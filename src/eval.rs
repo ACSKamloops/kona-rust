@@ -15,8 +15,10 @@ thread_local! {
 }
 
 /// Nested evaluations (eval_words_flow and apply_func frames together) before a limit error. A
-/// recursive K function costs about three per level, so this is ~3000 levels; C Kona manages 400
-/// and stack-errors at 2000. main.rs runs the interpreter on a thread with a stack big enough for it.
+/// recursive K function costs about three per level, so this is ~3300 levels; C Kona manages 400
+/// and stack-errors at 2000. Measured to fit an 8 MB stack with room to spare (the Linux/macOS
+/// main thread; build.rs reserves the same for the Windows exe). A host embedding the library
+/// (ue/) must give its calling thread that much, or lower this.
 const MAX_DEPTH: usize = 10_000;
 
 struct DepthGuard;

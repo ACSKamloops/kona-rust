@@ -85,21 +85,11 @@ fn usage_exit(msg: &str) -> ! {
     std::process::exit(1);
 }
 
-/// The interpreter runs on a thread with a large stack: the evaluator's recursion limit
-/// (eval.rs MAX_DEPTH, ~3000 K levels) needs more than the 8 MB main thread has, and a stack overflow
-/// is an abort, not an error. The reservation is virtual; only the pages touched are committed.
+// The interpreter stays on the main thread on purpose: moving it to a spawned thread with a big
+// stack made the 4M-number benches with several temporaries (the square, the hit test) twice as
+// slow on Linux (allocator behaviour differs off the main thread). The recursion limit (eval.rs
+// MAX_DEPTH) fits the 8 MB main stack of Linux/macOS; build.rs asks for the same on Windows.
 fn main() {
-    let worker = std::thread::Builder::new()
-        .name("kona".to_string())
-        .stack_size(1 << 30)
-        .spawn(real_main)
-        .expect("failed to start the interpreter thread");
-    if worker.join().is_err() {
-        std::process::exit(101);
-    }
-}
-
-fn real_main() {
     let args: Vec<String> = std::env::args().collect();
     let ktree = std::sync::Arc::new(KTree::new());
 

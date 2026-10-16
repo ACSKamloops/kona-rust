@@ -1063,6 +1063,10 @@ mod tests {
 
         let res_p2 = eval_words(&parse("_p").unwrap(), &mut env, &ktree).unwrap();
         assert_eq!(res_p2, K::int(1234));
+
+        // _p sets the process-wide print precision; put it back or the C-suite test running in
+        // parallel formats $ 1.2e-34 with 1234 digits
+        ktree.assign("_p".to_string(), K::int(7));
     }
 
     #[test]

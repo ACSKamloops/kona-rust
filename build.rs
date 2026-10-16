@@ -3,13 +3,25 @@
 // cxx) and builds the same library as its own program, cpp/kgame_server.exe (door 3), with the same compiler.
 
 fn main() {
+    // kona.exe gets a 64 MB main-thread stack reserve on Windows (the default is 1 MB; the
+    // evaluator's recursion limit, eval.rs MAX_DEPTH, needs about 8). Linux and macOS give the
+    // main thread 8 MB already. The reserve is virtual; pages are committed as they are touched.
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+    if target_os == "windows" {
+        if target_env == "msvc" {
+            println!("cargo:rustc-link-arg-bins=/STACK:67108864");
+        } else {
+            println!("cargo:rustc-link-arg-bins=-Wl,--stack,67108864");
+        }
+    }
     #[cfg(feature = "cpp")]
-    cpp::build();
+    cpp::build(target_os == "windows");
 }
 
 #[cfg(feature = "cpp")]
 mod cpp {
-    pub fn build() {
+    pub fn build(windows: bool) {
         for f in ["cpp/kgame_core.h", "cpp/kgame_core.cpp", "cpp/kgame_cxx.h", "cpp/kgame_cxx.cpp", "cpp/kgame_server.cpp"] {
             println!("cargo:rerun-if-changed={f}");
         }
@@ -19,6 +31,12 @@ mod cpp {
             .std("c++17")
             .opt_level(2)
             .compile("kgame");
+
+        // door 2 (the cxx bridge above) builds anywhere; door 3's server is a winsock program
+        if !windows {
+            println!("cargo:warning=cpp/kgame_server.exe (door 3) is Windows-only and was not built; door 2 is in");
+            return;
+        }
 
         let out = std::env::var("OUT_DIR").expect("OUT_DIR");
         let compiler = cc::Build::new().cpp(true).opt_level(2).get_compiler();
