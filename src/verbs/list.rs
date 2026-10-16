@@ -11,34 +11,11 @@ pub fn first(x: &K) -> Result<K, KonaError> {
         KData::IntAtom(_) | KData::FloatAtom(_) | KData::CharAtom(_) | KData::SymbolAtom(_) => {
             Ok(x.clone())
         }
-        KData::IntList(v) => {
-            if v.is_empty() {
-                Ok(K::nil())
-            } else {
-                Ok(K::int(v[0]))
-            }
-        }
-        KData::FloatList(v) => {
-            if v.is_empty() {
-                Ok(K::nil())
-            } else {
-                Ok(K::float(v[0]))
-            }
-        }
-        KData::CharList(v) => {
-            if v.is_empty() {
-                Ok(K::nil())
-            } else {
-                Ok(K::char(v[0] as char))
-            }
-        }
-        KData::SymbolList(v) => {
-            if v.is_empty() {
-                Ok(K::nil())
-            } else {
-                Ok(K::symbol(v[0].clone()))
-            }
-        }
+        // first of a typed empty list is the type's prototype, as in C Kona: *!0 is 0, *"" is " "
+        KData::IntList(v) => Ok(K::int(v.first().copied().unwrap_or(0))),
+        KData::FloatList(v) => Ok(K::float(v.first().copied().unwrap_or(0.0))),
+        KData::CharList(v) => Ok(K::char(v.first().map(|&c| c as char).unwrap_or(' '))),
+        KData::SymbolList(v) => Ok(K::symbol(v.first().cloned().unwrap_or_else(|| "".into()))),
         KData::GeneralList(v) => {
             if v.is_empty() {
                 Ok(K::nil())
@@ -351,8 +328,16 @@ pub fn take(a: &K, b: &K) -> Result<K, KonaError> {
         _ => return Err(KonaError::Type),
     };
 
+    // 0N (i64::MIN) as a count: C Kona segfaults, abs() overflows here; refuse it instead
+    if dims.iter().any(|&d| d == i64::MIN) {
+        return Err(KonaError::Domain);
+    }
+
+    // -1 in a shape list means "work this dimension out" (2 -1 # "abcd" is ("ab";"cd")); a plain
+    // -1#x is take-from-the-end and must not go through this rule (it used to return all of x)
+    let shape_given = !matches!(&**a, KData::IntAtom(_));
     let neg_ones = dims.iter().filter(|&&d| d == -1).count();
-    if neg_ones == 1 {
+    if shape_given && neg_ones == 1 {
         let b_len = b.len().unwrap_or(0) as i64;
         let other_prod: i64 = dims
             .iter()
@@ -488,7 +473,8 @@ pub fn drop_verb(a: &K, b: &K) -> Result<K, KonaError> {
             Ok(normalize_list(elements[n as usize..].to_vec()))
         }
     } else {
-        let drop_len = -n as usize;
+        // unsigned_abs so 0N (i64::MIN) drops everything instead of overflowing the negation
+        let drop_len = n.unsigned_abs() as usize;
         if drop_len >= count {
             let empty_res = match &**b {
                 KData::IntList(_) => K::int_list(vec![]),
@@ -676,20 +662,35 @@ pub fn flip(x: &K) -> Result<K, KonaError> {
             if v.is_empty() {
                 return Ok(x.clone());
             }
-            // Check if all elements are lists and have the same length
-            let first_len = match v[0].len() {
-                Ok(l) => l,
-                Err(_) => return Ok(x.clone()),
-            };
+            // Every list item must have the same length; atoms are spread across that length, as in
+            // C Kona: +(1 2;3) is (1 3;2 3) and +(1 2 3;"C";`x`y`z) puts "C" in every row
+            let mut first_len: Option<usize> = None;
             for item in v {
-                if item.len().unwrap_or(0) != first_len {
-                    return Err(KonaError::Length);
+                if item.is_atom() {
+                    continue;
+                }
+                let l = match item.len() {
+                    Ok(l) => l,
+                    Err(_) => return Ok(x.clone()),
+                };
+                match first_len {
+                    None => first_len = Some(l),
+                    Some(f) if f != l => return Err(KonaError::Length),
+                    _ => {}
                 }
             }
+            let Some(first_len) = first_len else {
+                // all atoms: +(1;2) is 1 2
+                return Ok(normalize_list(v.clone()));
+            };
             // Transpose
             let mut sublists = Vec::new();
             for item in v {
-                sublists.push(to_vec_of_atoms(item)?);
+                if item.is_atom() {
+                    sublists.push(vec![item.clone(); first_len]);
+                } else {
+                    sublists.push(to_vec_of_atoms(item)?);
+                }
             }
             let mut res_list = Vec::with_capacity(first_len);
             for col in 0..first_len {

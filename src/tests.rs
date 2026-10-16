@@ -541,20 +541,20 @@ mod tests {
         let res2b = eval_words(&expr2b, &mut env, &ktree).unwrap();
         assert_eq!(res2b, K::int_list(vec![13, 23]));
 
-        // 3. each-pair (':)
+        // 3. each-pair ('): C Kona gives f[y[i];y[i-1]] for i>0, one item fewer than y
         let expr3 = parse("-': 10 20 35").unwrap();
         let res3 = eval_words(&expr3, &mut env, &ktree).unwrap();
-        assert_eq!(res3, K::int_list(vec![10, 10, 15]));
+        assert_eq!(res3, K::int_list(vec![10, 15]));
 
-        // 3b. each-pair with LHS (dyadic)
+        // 3b. each-pair with LHS (dyadic): x itself goes in front of the pairs (tests.c: 10 -': 2 3 is 10 1)
         let expr3b = parse("10 -': 10 20 35").unwrap();
         let res3b = eval_words(&expr3b, &mut env, &ktree).unwrap();
-        assert_eq!(res3b, K::int_list(vec![0, 10, 15]));
+        assert_eq!(res3b, K::int_list(vec![10, 10, 15]));
 
-        // 3c. each-pair with atom RHS
+        // 3c. each-pair with atom RHS is f[y;y] (tests.c: +':2 is 4)
         let expr3c = parse("-': 10").unwrap();
         let res3c = eval_words(&expr3c, &mut env, &ktree).unwrap();
-        assert_eq!(res3c, K::int(10));
+        assert_eq!(res3c, K::int(0));
 
         // 4. convergence `/`
         // halving until 0: {x / 2}/ 100 -> 0

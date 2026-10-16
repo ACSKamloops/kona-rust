@@ -7,7 +7,6 @@ use crate::verbs::math::{normalize_list, to_vec_of_atoms};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-const MAX_ADVERB_STEPS: usize = 100_000;
 
 pub fn eval_adverb(
     name: &str,
@@ -92,30 +91,6 @@ fn valence_of(k: &K) -> usize {
     }
 }
 
-fn is_each_adverb(k: &K) -> bool {
-    matches!(
-        &**k,
-        crate::types::KData::Function(crate::types::KFunc::Adverb { name, .. }) if name == "'"
-    )
-}
-
-fn unwrap_singleton_general(k: K) -> K {
-    let mut current = k;
-    loop {
-        if let crate::types::KData::GeneralList(v) = &*current {
-            if v.len() == 1 && !is_empty_list(&v[0]) {
-                current = v[0].clone();
-                continue;
-            }
-        }
-        return current;
-    }
-}
-
-fn is_singleton_general(k: &K) -> bool {
-    matches!(&**k, crate::types::KData::GeneralList(v) if v.len() == 1)
-}
-
 fn is_empty_list(k: &K) -> bool {
     match &**k {
         crate::types::KData::IntList(v) => v.is_empty(),
@@ -155,11 +130,29 @@ fn left_bound_projection(operand: &K) -> Option<(K, K)> {
     }
 }
 
-fn ensure_step_budget(step: usize) -> Result<(), KonaError> {
-    if step >= MAX_ADVERB_STEPS {
-        Err(KonaError::Limit)
-    } else {
-        Ok(())
+/// Items per each-right/each-left before the work is split across threads. Only pure primitives get
+/// there (see parallel_safe), and a thread start costs tens of microseconds, so small lists stay serial.
+const PAR_EACH_MIN: usize = 2048;
+
+/// Only pure arithmetic primitives may run on worker threads. A user function (or anything that can
+/// reach one: projections, compositions, @ and . applying a function value) updates globals through two
+/// separate KTree locks, so running it on several threads loses updates: `cnt:0; 0 {cnt+:y}/: !20000`
+/// came back ~108M instead of 199990000 on every multi-core run. _draw, 0: 1: and the doors stay off
+/// the threads too, so a fixed seed and printed output keep program order. (Made by Claude)
+fn parallel_safe(operand: &K, fixed: &K) -> bool {
+    if fixed.is_function() {
+        return false;
+    }
+    match &**operand {
+        crate::types::KData::Function(crate::types::KFunc::Primitive(name)) => matches!(
+            name.as_str(),
+            "+" | "-" | "*" | "%" | "&" | "|" | "<" | ">" | "=" | "~" | "," | "#" | "_" | "!" | "^"
+                | "$" | "_sin" | "_cos" | "_tan" | "_asin" | "_acos" | "_atan" | "_sinh" | "_cosh"
+                | "_tanh" | "_exp" | "_log" | "_sqr" | "_sqrt" | "_abs" | "_floor" | "_dot" | "_mul"
+                | "_in" | "_lin" | "_bin" | "_binl" | "_vs" | "_sv" | "_vsx" | "_sm" | "_ss" | "_di"
+                | "_dv" | "_dvl" | "_ci" | "_ic"
+        ),
+        _ => false,
     }
 }
 
@@ -232,15 +225,13 @@ fn eval_over(
                 let cond = &funcs[0];
                 let body = &funcs[1];
                 let mut curr = x.clone();
-                for step in 0..MAX_ADVERB_STEPS {
-                    ensure_step_budget(step)?;
+                loop {
                     let cond_val = crate::eval::apply_func(cond, &[curr.clone()], env, ktree)?;
                     if !is_truthy_internal(&cond_val) {
                         return Ok(curr);
                     }
                     curr = crate::eval::apply_func(body, &[curr], env, ktree)?;
                 }
-                return Err(KonaError::Limit);
             }
         }
 
@@ -259,15 +250,13 @@ fn eval_over(
 
         if can_be_monadic(operand) {
             let mut curr = x.clone();
-            for step in 0..MAX_ADVERB_STEPS {
-                ensure_step_budget(step)?;
+            loop {
                 let next = crate::eval::apply_func(operand, &[curr.clone()], env, ktree)?;
                 if next == *x || next == curr {
                     return Ok(curr);
                 }
                 curr = next;
             }
-            Err(KonaError::Limit)
         } else {
             if matches!(**x, crate::types::KData::Nil) {
                 return Ok(K::nil());
@@ -317,15 +306,13 @@ fn eval_over(
         }
         if matches!(**x_val, crate::types::KData::Function(_)) {
             let mut curr = y_val.clone();
-            for step in 0..MAX_ADVERB_STEPS {
-                ensure_step_budget(step)?;
+            loop {
                 let cond_val = crate::eval::apply_func(x_val, &[curr.clone()], env, ktree)?;
                 if !is_truthy_internal(&cond_val) {
                     return Ok(curr);
                 }
                 curr = crate::eval::apply_func(operand, &[curr], env, ktree)?;
             }
-            Err(KonaError::Limit)
         } else if let Some(n) = x_val.as_int() {
             if can_be_monadic(operand) {
                 let mut res = y_val.clone();
@@ -353,19 +340,20 @@ fn eval_over(
         // N-ary over: f/[init; y1; y2; ...; yk]
         let init = &args[0];
         let y_args = &args[1..];
-        let mut len = 0;
+        let mut len: Option<usize> = None;
         let mut has_list = false;
         for a in y_args {
             if a.is_list() {
                 has_list = true;
                 let a_len = a.len()?;
-                if len == 0 {
-                    len = a_len;
-                } else if a_len != len {
-                    return Err(KonaError::Length);
+                match len {
+                    None => len = Some(a_len),
+                    Some(l) if l != a_len => return Err(KonaError::Length),
+                    _ => {}
                 }
             }
         }
+        let len = len.unwrap_or(0);
         let count = if has_list { len } else { 1 };
         let mut y_vecs = Vec::with_capacity(y_args.len());
         for a in y_args {
@@ -492,8 +480,7 @@ fn eval_scan(
                 let body = &funcs[1];
                 let mut curr = x.clone();
                 let mut res = vec![curr.clone()];
-                for step in 0..MAX_ADVERB_STEPS {
-                    ensure_step_budget(step)?;
+                loop {
                     let cond_val = crate::eval::apply_func(cond, &[curr.clone()], env, ktree)?;
                     if !is_truthy_internal(&cond_val) {
                         return Ok(normalize_scan_result(operand, res));
@@ -501,7 +488,6 @@ fn eval_scan(
                     curr = crate::eval::apply_func(body, &[curr], env, ktree)?;
                     res.push(curr.clone());
                 }
-                return Err(KonaError::Limit);
             }
         }
 
@@ -509,8 +495,7 @@ fn eval_scan(
             if can_be_monadic(operand) {
                 let mut curr = x.clone();
                 let mut res = vec![curr.clone()];
-                for step in 0..MAX_ADVERB_STEPS {
-                    ensure_step_budget(step)?;
+                loop {
                     let next = crate::eval::apply_func(operand, &[curr.clone()], env, ktree)?;
                     if next == *x || next == curr {
                         return Ok(normalize_scan_result(operand, res));
@@ -518,7 +503,6 @@ fn eval_scan(
                     curr = next;
                     res.push(curr.clone());
                 }
-                Err(KonaError::Limit)
             } else {
                 let x_vec = to_vec_of_atoms(x)?;
                 if x_vec.is_empty() {
@@ -546,8 +530,7 @@ fn eval_scan(
             }
             let mut curr = x.clone();
             let mut res = vec![curr.clone()];
-            for step in 0..MAX_ADVERB_STEPS {
-                ensure_step_budget(step)?;
+            loop {
                 let next = crate::eval::apply_func(operand, &[curr.clone()], env, ktree)?;
                 if res.iter().any(|seen| seen == &next) {
                     return Ok(normalize_scan_result(operand, res));
@@ -555,7 +538,6 @@ fn eval_scan(
                 curr = next;
                 res.push(curr.clone());
             }
-            Err(KonaError::Limit)
         } else {
             let x_vec = to_vec_of_atoms(x)?;
             if x_vec.is_empty() {
@@ -579,8 +561,7 @@ fn eval_scan(
         if matches!(**x_val, crate::types::KData::Function(_)) {
             let mut curr = y_val.clone();
             let mut res = vec![curr.clone()];
-            for step in 0..MAX_ADVERB_STEPS {
-                ensure_step_budget(step)?;
+            loop {
                 let cond_val = crate::eval::apply_func(x_val, &[curr.clone()], env, ktree)?;
                 if !is_truthy_internal(&cond_val) {
                     return Ok(normalize_scan_result(operand, res));
@@ -588,7 +569,6 @@ fn eval_scan(
                 curr = crate::eval::apply_func(operand, &[curr], env, ktree)?;
                 res.push(curr.clone());
             }
-            Err(KonaError::Limit)
         } else if let Some(n) = x_val.as_int() {
             if can_be_monadic(operand) {
                 let mut res = vec![y_val.clone()];
@@ -630,19 +610,20 @@ fn eval_scan(
         // N-ary scan: f\[init; y1; y2; ...; yk]
         let init = &args[0];
         let y_args = &args[1..];
-        let mut len = 0;
+        let mut len: Option<usize> = None;
         let mut has_list = false;
         for a in y_args {
             if a.is_list() {
                 has_list = true;
                 let a_len = a.len()?;
-                if len == 0 {
-                    len = a_len;
-                } else if a_len != len {
-                    return Err(KonaError::Length);
+                match len {
+                    None => len = Some(a_len),
+                    Some(l) if l != a_len => return Err(KonaError::Length),
+                    _ => {}
                 }
             }
         }
+        let len = len.unwrap_or(0);
         let count = if has_list { len } else { 1 };
         let mut y_vecs = Vec::with_capacity(y_args.len());
         for a in y_args {
@@ -697,13 +678,7 @@ fn eval_each(
         let x_vec = to_vec_of_atoms(x)?;
         let mut res = Vec::with_capacity(x_vec.len());
         for xe in x_vec {
-            let unwrap_item = is_each_adverb(operand) || is_singleton_general(&xe);
-            let item = crate::eval::apply_func(operand, &[xe], env, ktree)?;
-            res.push(if unwrap_item {
-                unwrap_singleton_general(item)
-            } else {
-                item
-            });
+            res.push(crate::eval::apply_func(operand, &[xe], env, ktree)?);
         }
         Ok(normalize_list(res))
     } else {
@@ -714,17 +689,20 @@ fn eval_each(
             return crate::eval::apply_func(operand, args, env, ktree);
         }
         // 2. Find the length of the lists.
-        let mut len = 0;
+        // None until the first list is seen: an empty list in first position used to leave the
+        // length at 0, so a later 1 2 3 passed the check and the loop below indexed into the empty vec
+        let mut len: Option<usize> = None;
         for a in args {
             if a.is_list() {
-                let a_vec = to_vec_of_atoms(a)?;
-                if len == 0 {
-                    len = a_vec.len();
-                } else if a_vec.len() != len {
-                    return Err(KonaError::Length);
+                let a_len = to_vec_of_atoms(a)?.len();
+                match len {
+                    None => len = Some(a_len),
+                    Some(l) if l != a_len => return Err(KonaError::Length),
+                    _ => {}
                 }
             }
         }
+        let len = len.unwrap_or(0);
         // 3. Collect elements and apply.
         let mut args_vecs = Vec::with_capacity(args.len());
         for a in args {
@@ -793,7 +771,7 @@ fn eval_each_right(
     let y_vec = to_vec_of_atoms(y_val)?;
     let len = y_vec.len();
 
-    if len > 8 {
+    if len >= PAR_EACH_MIN && parallel_safe(operand, x) {
         let res = par_apply(y_vec, |ye| {
             crate::eval::apply_func(operand, &[x.clone(), ye], env, ktree)
         })?;
@@ -826,7 +804,7 @@ fn eval_each_left(
     let x_vec = to_vec_of_atoms(x)?;
     let len = x_vec.len();
 
-    if len > 8 {
+    if len >= PAR_EACH_MIN && parallel_safe(operand, y_val) {
         let res = par_apply(x_vec, |xe| {
             crate::eval::apply_func(operand, &[xe, y_val.clone()], env, ktree)
         })?;
@@ -858,28 +836,28 @@ fn eval_each_pair(
         (None, x)
     };
 
+    // C Kona's each-pair (checked against its tests.c and the binary): f': y gives f[y[i];y[i-1]] for
+    // i>0, so one item fewer than y; an atom gives f[y;y]; a one-item list gives (). With a left
+    // argument, x f': y puts x itself in front of those pairs (10 -': 2 3 7 is 10 1 4) and x f': atom
+    // is just x. The old code returned y[0] / f[y[0];x] first, which is k4's prior. (Made by Claude)
     if rhs.is_atom() {
-        if let Some(left) = lhs {
-            crate::eval::apply_func(operand, &[rhs.clone(), left.clone()], env, ktree)
-        } else {
-            Ok(rhs.clone())
-        }
-    } else {
-        let rhs_vec = to_vec_of_atoms(rhs)?;
-        if rhs_vec.is_empty() {
-            return Ok(normalize_list(vec![]));
-        }
-        let mut res = Vec::with_capacity(rhs_vec.len());
-        if let Some(left) = lhs {
-            res.push(crate::eval::apply_func(
-                operand,
-                &[rhs_vec[0].clone(), left.clone()],
-                env,
-                ktree,
-            )?);
-        } else {
-            res.push(rhs_vec[0].clone());
-        }
+        return match lhs {
+            Some(left) => Ok(left.clone()),
+            None => crate::eval::apply_func(operand, &[rhs.clone(), rhs.clone()], env, ktree),
+        };
+    }
+    let rhs_vec = to_vec_of_atoms(rhs)?;
+    if rhs_vec.is_empty() && lhs.is_none() {
+        return Err(KonaError::Length);
+    }
+    if rhs_vec.len() < 2 {
+        return Ok(K::general_list(vec![]));
+    }
+    let mut res = Vec::with_capacity(rhs_vec.len());
+    if let Some(left) = lhs {
+        res.push(left.clone());
+    }
+    {
         for i in 1..rhs_vec.len() {
             res.push(crate::eval::apply_func(
                 operand,
