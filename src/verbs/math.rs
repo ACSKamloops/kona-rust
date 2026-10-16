@@ -885,7 +885,18 @@ pub fn format_verb(x: &K) -> Result<K, KonaError> {
         KData::Nil => Ok(K::char_list(vec![])),
         KData::SymbolAtom(s) => Ok(K::char_list(s.as_bytes().to_vec())),
         KData::IntAtom(i) => Ok(K::char_list(i.to_string().into_bytes())),
-        KData::FloatAtom(f) => Ok(K::char_list(format!("{}", f).into_bytes())),
+        // the same %.{p}g text the prompt shows: $ 0.1+0.2 is "0.3" in C Kona, not "0.30000000000000004"
+        KData::FloatAtom(f) => {
+            let p = crate::io::PRINT_PRECISION.load(std::sync::atomic::Ordering::Relaxed);
+            let s = if f.is_nan() {
+                "0n".to_string()
+            } else if f.is_infinite() {
+                if f.is_sign_positive() { "0i" } else { "-0i" }.to_string()
+            } else {
+                crate::io::fmt_g(*f, p)
+            };
+            Ok(K::char_list(s.into_bytes()))
+        }
         KData::IntList(v) => {
             let res = v
                 .iter()

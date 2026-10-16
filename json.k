@@ -22,7 +22,10 @@ depths: {n:#x; d: n#0; dep: 0; inq: 0; i: 0; while[i<n; c: x[i]; :[c=dq[0]; inq:
 dsplit: {d: depths x; cpos: &(x=cm[0])&(d=y); trimc' (0,(1+cpos))_ x}
 
 / parse a JSON value: detect type by first char, recurse as needed
-pval: {:[0=#x; _n; x[0]=lcb[0]; pobj x; x[0]=lsb[0]; parr x; x[0]=dq[0]; unbrace x; x~"null"; _n; x~"true"; 1; x~"false"; 0; eval x]}
+/ a bare value is a number or nothing: only digits sign point exponent reach eval, so a JSON file
+/ cannot run K code through its unquoted values (it used to: {"a":6:"/etc/passwd"} read the file)
+isnum: {&/x _lin "0123456789.-+eE"}
+pval: {:[0=#x; _n; x[0]=lcb[0]; pobj x; x[0]=lsb[0]; parr x; x[0]=dq[0]; unbrace x; x~"null"; _n; x~"true"; 1; x~"false"; 0; isnum x; eval x; x]}
 
 / parse array: strip brackets, split on commas at depth 0, parse each
 parr: {inner: unbrace x; :[0=#inner; !0; pval' dsplit[inner;0]]}

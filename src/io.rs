@@ -11,6 +11,16 @@ use std::sync::Arc;
 
 pub static PRINT_PRECISION: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(7);
 
+/// A client that sends part of a request and stops used to hold a thread (and its pre-allocated
+/// body) forever. The IPC limit is generous because a game client keeps one connection open.
+const HTTP_READ_TIMEOUT_SECS: u64 = 30;
+const IPC_READ_TIMEOUT_SECS: u64 = 600;
+/// Connection threads run user K handlers (.m.g .m.s .m.h), so they get the same deep stack as the
+/// main interpreter thread rather than the 2 MB default; the reservation is virtual.
+const CONNECTION_STACK: usize = 256 << 20;
+/// Longest HTTP request head read before answering 400
+const HTTP_MAX_HEAD: usize = 64 * 1024;
+
 pub fn active_sockets() -> K {
     if let Ok(reg) = socket_registry().lock() {
         let mut keys: Vec<i64> = reg.keys().cloned().collect();
@@ -22,44 +32,72 @@ pub fn active_sockets() -> K {
 }
 
 /// Formats a K object to its string representation.
+/// C Kona prints floats with %.{p}g (\p is significant digits, 7 by default): 0.000123456 stays
+/// 0.000123456, 123.456789 is 123.4568 and the big ones are 8.507059e+37. Rust's {:.p} is decimal
+/// places, which cut small numbers short and printed 38-digit integers. (Made by Claude)
+pub fn fmt_g(f: f64, p: usize) -> String {
+    let p = p.max(1);
+    if f == 0.0 {
+        return "0".to_string();
+    }
+    // round to p significant digits first, then read the exponent off the rounded number
+    let sci = format!("{:.*e}", p - 1, f);
+    let (mantissa, exp) = sci.split_once('e').unwrap_or((sci.as_str(), "0"));
+    let exp: i32 = exp.parse().unwrap_or(0);
+    if exp < -4 || exp >= p as i32 {
+        let m = trim_fraction_zeros(mantissa);
+        format!("{}e{}{:02}", m, if exp < 0 { '-' } else { '+' }, exp.abs())
+    } else {
+        let decimals = (p as i32 - 1 - exp).max(0) as usize;
+        trim_fraction_zeros(&format!("{:.*}", decimals, f))
+    }
+}
+
+fn trim_fraction_zeros(s: &str) -> String {
+    if !s.contains('.') {
+        return s.to_string();
+    }
+    let t = s.trim_end_matches('0');
+    t.strip_suffix('.').unwrap_or(t).to_string()
+}
+
+/// A float the way the prompt shows it; with_point adds .0 to a whole number (the atom, and the
+/// last item of a list: 1 2 3.0)
+fn fmt_float(f: f64, with_point: bool) -> String {
+    if f.is_nan() {
+        return "0n".to_string();
+    }
+    if f.is_infinite() {
+        // K3 spells infinity 0i (0w is k4)
+        return if f.is_sign_positive() { "0i" } else { "-0i" }.to_string();
+    }
+    let p = PRINT_PRECISION.load(std::sync::atomic::Ordering::Relaxed);
+    let mut s = if p == 0 { format!("{}", f) } else { fmt_g(f, p) };
+    if with_point && !s.contains('.') && !s.contains('e') {
+        s.push_str(".0");
+    }
+    s
+}
+
+/// An int with K3's null and infinities spelled out: 0N 0I -0I
+pub fn fmt_int(i: i64) -> String {
+    if i == i64::MIN {
+        "0N".to_string()
+    } else if i == i64::MAX {
+        "0I".to_string()
+    } else if i == -i64::MAX {
+        "-0I".to_string()
+    } else {
+        i.to_string()
+    }
+}
+
 pub fn format_k(k: &K) -> String {
     match &**k {
         KData::HashList { .. } => ".(..)".to_string(),
         KData::Nil => "".to_string(),
-        KData::IntAtom(i) => {
-            if *i == i64::MIN {
-                "0N".to_string()
-            } else {
-                i.to_string()
-            }
-        }
-        KData::FloatAtom(f) => {
-            if f.is_nan() {
-                "0n".to_string()
-            } else if f.is_infinite() {
-                if f.is_sign_positive() { "0w" } else { "-0w" }.to_string()
-            } else {
-                let p = PRINT_PRECISION.load(std::sync::atomic::Ordering::Relaxed);
-                if p == 0 {
-                    format!("{}", f)
-                } else {
-                    let formatted = format!("{:.1$}", f, p);
-                    let mut s = formatted.as_str();
-                    // Trim trailing zeros from the decimal part
-                    if s.contains('.') {
-                        s = s.trim_end_matches('0');
-                        if s.ends_with('.') {
-                            s = &s[..s.len() - 1];
-                        }
-                    }
-                    if !s.contains('.') {
-                        format!("{}.0", s)
-                    } else {
-                        s.to_string()
-                    }
-                }
-            }
-        }
+        KData::IntAtom(i) => fmt_int(*i),
+        KData::FloatAtom(f) => fmt_float(*f, true),
         KData::CharAtom(c) => {
             format!("\"{}\"", c)
         }
@@ -70,10 +108,10 @@ pub fn format_k(k: &K) -> String {
             if v.is_empty() {
                 "!0".to_string()
             } else if v.len() == 1 {
-                format!(",{}", v[0])
+                format!(",{}", fmt_int(v[0]))
             } else {
                 v.iter()
-                    .map(|x| x.to_string())
+                    .map(|x| fmt_int(*x))
                     .collect::<Vec<String>>()
                     .join(" ")
             }
@@ -87,33 +125,8 @@ pub fn format_k(k: &K) -> String {
                     let is_last = idx == v.len() - 1;
                     let s = if x.is_nan() {
                         "0n".to_string()
-                    } else if x.is_infinite() {
-                        if x.is_sign_positive() { "0w" } else { "-0w" }.to_string()
                     } else {
-                        let p = PRINT_PRECISION.load(std::sync::atomic::Ordering::Relaxed);
-                        if p == 0 {
-                            let mut s = format!("{}", x);
-                            if is_last && !s.contains('.') {
-                                s.push_str(".0");
-                            }
-                            s
-                        } else {
-                            let formatted_str = format!("{:.1$}", x, p);
-                            let mut s = formatted_str.as_str();
-                            let mut s_str = if s.contains('.') {
-                                s = s.trim_end_matches('0');
-                                if s.ends_with('.') {
-                                    s = &s[..s.len() - 1];
-                                }
-                                s.to_string()
-                            } else {
-                                s.to_string()
-                            };
-                            if is_last && !s_str.contains('.') {
-                                s_str.push_str(".0");
-                            }
-                            s_str
-                        }
+                        fmt_float(x, is_last)
                     };
                     formatted.push(s);
                 }
@@ -124,7 +137,10 @@ pub fn format_k(k: &K) -> String {
                 }
             }
         }
+        // a one-item list prints with a leading comma, as C Kona does, so ,"c" ,`a and ,1 2 3 are
+        // told apart from the atom "c", the atom `a and the list 1 2 3 (they used to print the same)
         KData::CharList(v) => match std::str::from_utf8(v) {
+            Ok(s) if v.len() == 1 => format!(",\"{}\"", s),
             Ok(s) => format!("\"{}\"", s),
             Err(_) => {
                 format!("char_list(len={})", v.len())
@@ -133,6 +149,8 @@ pub fn format_k(k: &K) -> String {
         KData::SymbolList(v) => {
             if v.is_empty() {
                 "0#`".to_string()
+            } else if v.len() == 1 {
+                format!(",`{}", v[0])
             } else {
                 v.iter()
                     .map(|s| format!("`{}", s))
@@ -143,6 +161,8 @@ pub fn format_k(k: &K) -> String {
         KData::GeneralList(v) => {
             if v.is_empty() {
                 "()".to_string()
+            } else if v.len() == 1 {
+                format!(",{}", format_k(&v[0]))
             } else {
                 let items: Vec<String> = v.iter().map(|item| format_k(item)).collect();
                 format!("({})", items.join(";"))
@@ -435,11 +455,27 @@ fn serialize_k_to(k: &K, buf: &mut Vec<u8>) {
 pub struct KDeserializer<'a> {
     data: &'a [u8],
     offset: usize,
+    depth: usize,
 }
+
+/// Nesting allowed in a binary value (1: files and -i messages): a general list inside a general list
+/// costs 6 bytes per level, so without a cap a 6 MB message recursed a million deep and overflowed the
+/// thread's stack. 64 levels is what kwire.rs allows for the C format too.
+const MAX_BINARY_DEPTH: usize = 64;
 
 impl<'a> KDeserializer<'a> {
     pub fn new(data: &'a [u8]) -> Self {
-        Self { data, offset: 0 }
+        Self { data, offset: 0, depth: 0 }
+    }
+
+    pub fn read_k(&mut self) -> Result<K, KonaError> {
+        if self.depth >= MAX_BINARY_DEPTH {
+            return Err(KonaError::Parse("Binary value nested too deep".to_string()));
+        }
+        self.depth += 1;
+        let res = self.read_k_inner();
+        self.depth -= 1;
+        res
     }
 
     pub fn remaining(&self) -> usize {
@@ -518,7 +554,7 @@ impl<'a> KDeserializer<'a> {
             .map_err(|_| KonaError::Parse("Corrupt binary file".to_string()))
     }
 
-    pub fn read_k(&mut self) -> Result<K, KonaError> {
+    fn read_k_inner(&mut self) -> Result<K, KonaError> {
         let tag = self.read_u8()?;
         match tag {
             0 => Ok(K::nil()),
@@ -694,15 +730,27 @@ pub fn load_c_library(_x: &K) -> Result<K, KonaError> {
 // --- SERVERS ---
 
 pub fn handle_http_connection(mut stream: TcpStream, ktree: Arc<KTree>) -> Result<(), KonaError> {
+    // read until the end of the request head (a blank line): one read() can return any prefix of
+    // the request, and a request line split across two segments used to be answered with a 400
+    let mut head: Vec<u8> = Vec::new();
     let mut buffer = [0; 4096];
-    let bytes_read = stream
-        .read(&mut buffer)
-        .map_err(|e| KonaError::System(format!("Socket read error: {}", e)))?;
-    if bytes_read == 0 {
+    loop {
+        let bytes_read = stream
+            .read(&mut buffer)
+            .map_err(|e| KonaError::System(format!("Socket read error: {}", e)))?;
+        if bytes_read == 0 {
+            break;
+        }
+        head.extend_from_slice(&buffer[..bytes_read]);
+        if head.windows(4).any(|w| w == b"\r\n\r\n") || head.len() >= HTTP_MAX_HEAD {
+            break;
+        }
+    }
+    if head.is_empty() {
         return Ok(());
     }
 
-    let request_str = String::from_utf8_lossy(&buffer[..bytes_read]);
+    let request_str = String::from_utf8_lossy(&head);
     let first_line = request_str.lines().next().unwrap_or("");
     let parts: Vec<&str> = first_line.split_whitespace().collect();
     if parts.len() < 2 {
@@ -780,7 +828,11 @@ pub fn start_http_server(port: u16, ktree: Arc<KTree>) {
             }
         };
         let ktree_clone = ktree.clone();
-        std::thread::spawn(move || {
+        // an idle or half-sent request no longer pins a thread forever
+        let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(HTTP_READ_TIMEOUT_SECS)));
+        let _ = std::thread::Builder::new()
+            .stack_size(CONNECTION_STACK)
+            .spawn(move || {
             if let Err(e) = handle_http_connection(stream, ktree_clone) {
                 eprintln!("Error handling HTTP connection: {:?}", e);
             }
@@ -844,7 +896,9 @@ fn handle_c_message(stream: &mut TcpStream, first5: [u8; 5], ktree: &Arc<KTree>)
         .map_err(|e| KonaError::System(format!("Failed to read IPC header: {}", e)))?;
     let d = rest[2]; // header byte 7
     let size = i64::from_le_bytes(rest[3..11].try_into().unwrap_or([0; 8]));
-    if !(0..=1i64 << 31).contains(&size) {
+    // same 100 MB cap as the port's own format: the body is allocated before it arrives, and the old
+    // bound (2 GB) let one 16-byte header reserve 2 GB per connection
+    if !(0..=100 * 1024 * 1024).contains(&size) {
         return Err(KonaError::Parse("IPC message too large".to_string()));
     }
     let _ = first5;
@@ -956,7 +1010,10 @@ pub fn start_ipc_server(port: u16, ktree: Arc<KTree>) {
             }
         };
         let ktree_clone = ktree.clone();
-        std::thread::spawn(move || {
+        let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(IPC_READ_TIMEOUT_SECS)));
+        let _ = std::thread::Builder::new()
+            .stack_size(CONNECTION_STACK)
+            .spawn(move || {
             if let Err(e) = handle_ipc_connection(stream, ktree_clone) {
                 eprintln!("Error handling IPC connection: {:?}", e);
             }

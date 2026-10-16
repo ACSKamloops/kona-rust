@@ -14,12 +14,17 @@ thread_local! {
     static RECENT_LOCALS: std::cell::RefCell<std::collections::HashSet<String>> = std::cell::RefCell::new(std::collections::HashSet::new());
 }
 
+/// Nested evaluations (eval_words_flow and apply_func frames together) before a limit error. A
+/// recursive K function costs about three per level, so this is ~3000 levels; C Kona manages 400
+/// and stack-errors at 2000. main.rs runs the interpreter on a thread with a stack big enough for it.
+const MAX_DEPTH: usize = 10_000;
+
 struct DepthGuard;
 impl DepthGuard {
     fn new() -> Result<Self, KonaError> {
         RECURSION_DEPTH.with(|d| {
             let val = d.get();
-            if val >= 1000 {
+            if val >= MAX_DEPTH {
                 Err(KonaError::Limit)
             } else {
                 d.set(val + 1);

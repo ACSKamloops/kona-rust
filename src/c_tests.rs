@@ -354,6 +354,7 @@ fn test_c_suite_comparison() {
     let mut passed = 0;
     let mut failed = 0;
     let mut skipped = 0;
+    let mut both_errored = 0;
     let mut fail_reports = Vec::new();
 
     for tc in test_cases {
@@ -368,11 +369,6 @@ fn test_c_suite_comparison() {
         }
         // Skip DNS host lookup if it fails (localhost is fine, but network hosts might be blocked)
         if tc.lhs.contains("_host") && !tc.lhs.contains("localhost") {
-            skipped += 1;
-            continue;
-        }
-        // Skip each-prior tests since they assert the old incorrect behavior
-        if tc.lhs.contains("':") || tc.rhs.contains("':") {
             skipped += 1;
             continue;
         }
@@ -419,18 +415,19 @@ fn test_c_suite_comparison() {
                 fail_reports.push(report);
             }
             (Err(_e_lhs), Err(_e_rhs)) => {
-                // If both error, do they produce similar errors?
-                // For example, both should return some error. In K, error traps return (1; "type") etc.
-                // We'll see if they match.
-                passed += 1; // Temporary: treat both erroring as pass, but we'll refine if error messages differ
+                // Every case in tests.c passes in C Kona, so both sides erroring is not a pass; it is
+                // counted on its own line (not in the ratchet) so a verb raising the wrong error, or a
+                // regression that breaks both sides at once, stays visible
+                both_errored += 1;
             }
         }
     }
 
     println!("Test Comparison Summary:");
-    println!("  Total:   {}", passed + failed + skipped);
+    println!("  Total:   {}", passed + failed + skipped + both_errored);
     println!("  Passed:  {}", passed);
     println!("  Failed:  {}", failed);
+    println!("  Both sides errored (not counted as pass): {}", both_errored);
     println!("  Skipped: {}", skipped);
 
     if failed > 0 {
