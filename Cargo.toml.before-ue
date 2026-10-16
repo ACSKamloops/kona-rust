@@ -1,0 +1,20 @@
+[package]
+name = "kona"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bytemuck = { version = "1.25.2", optional = true }
+pollster = { version = "1.0.1", optional = true }
+wgpu = { version = "30.0.1", optional = true }
+cxx = { version = "1.0", optional = true }
+
+[build-dependencies]
+cxx-build = { version = "1.0", optional = true }
+cc = { version = "1.0", optional = true }
+
+[features]
+# GPU Kona: cargo build --release --features gpu   (plain cargo build = CPU-only Kona, no extra libraries)
+gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
+# C++ door: cargo build --release --features cpp   (_sys library 2 built in, plus cpp/kgame_server.exe for library 3)
+cpp = ["dep:cxx", "dep:cxx-build", "dep:cc"]

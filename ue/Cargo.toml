@@ -1,0 +1,22 @@
+# Made by Claude
+# kona_ue - Kona as one .lib file that an Unreal Engine C++ module links in (the Kona horde bench).
+# Build: cargo build --release   (in this folder)  ->  target\release\kona_ue.lib
+# The C++ header it needs is written to target\cxxbridge\kona_ue\src\bridge.rs.h (+ target\cxxbridge\rust\cxx.h).
+[package]
+name = "kona_ue"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+kona = { path = "..", default-features = false }
+cxx = "1.0"
+
+[build-dependencies]
+cxx-build = "1.0"
+
+[profile.release]
+panic = "unwind"
+# Made by Claude

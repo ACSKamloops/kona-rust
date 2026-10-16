@@ -1,0 +1,283 @@
+#![cfg_attr(not(feature = "cpp"), forbid(unsafe_code))]
+// with the C++ door built in, unsafe is still refused everywhere except the cxx bridge in door_cpp.rs
+#![cfg_attr(feature = "cpp", deny(unsafe_code))]
+// lib.rs - Kona as a library (split out of main.rs 2026-10-15 so other programs, like the Unreal bench, can run K).
+// kona.exe (main.rs) is the same as before: it calls into this library.
+
+pub mod adverbs;
+pub mod errors;
+pub mod eval;
+pub mod io;
+
+pub static STEP_SCRIPT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub mod parser;
+pub mod types;
+pub mod kwire;
+pub mod pool;
+pub mod gpu;
+pub mod door;
+pub mod door_net;
+pub mod door_bcpl;
+#[cfg(feature = "cpp")]
+pub mod door_cpp;
+pub mod verbs;
+
+#[cfg(test)]
+pub mod c_tests;
+#[cfg(test)]
+pub mod tests;
+
+use crate::errors::KonaError;
+use crate::types::K;
+use crate::verbs::dict::KTree;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+pub fn count_braces(s: &str) -> i32 {
+    let mut count = 0;
+    let mut in_str = false;
+    let mut escaped = false;
+    let mut prev_char: Option<char> = None;
+    for c in s.chars() {
+        if in_str {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_str = false;
+            }
+        } else {
+            if c == '"' {
+                in_str = true;
+            } else if c == '/' {
+                let preceded_by_whitespace = match prev_char {
+                    None => true,
+                    Some(pc) => pc == ' ' || pc == '\t' || pc == '\n' || pc == '\r',
+                };
+                if preceded_by_whitespace {
+                    break;
+                }
+            } else if c == '{' || c == '[' || c == '(' {
+                count += 1;
+            } else if c == '}' || c == ']' || c == ')' {
+                count -= 1;
+            }
+        }
+        prev_char = Some(c);
+    }
+    count
+}
+
+pub fn load_and_run_script(path: &str, ktree: &Arc<KTree>) -> Result<(), KonaError> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| KonaError::File(format!("Failed to read script {}: {}", path, e)))?;
+
+    let mut env = HashMap::new();
+    let mut accumulator = String::new();
+    let mut brace_depth = 0;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('/') {
+            continue;
+        }
+
+        if STEP_SCRIPT.load(std::sync::atomic::Ordering::Relaxed) {
+            println!("step> {}", line);
+        }
+
+        if trimmed.starts_with("\\l ") {
+            let sub_path = trimmed["\\l ".len()..].trim();
+            let target_path = if std::path::Path::new(sub_path).exists() {
+                sub_path.to_string()
+            } else {
+                let with_k = format!("{}.k", sub_path);
+                if std::path::Path::new(&with_k).exists() {
+                    with_k
+                } else {
+                    sub_path.to_string()
+                }
+            };
+            load_and_run_script(&target_path, ktree)?;
+            continue;
+        }
+
+        if trimmed.starts_with("\\t ") {
+            let code = trimmed["\\t ".len()..].trim();
+            let words = crate::parser::parse(code)?;
+            let start = std::time::Instant::now();
+            let res = crate::eval::eval_words(&words, &mut env, ktree)?;
+            let elapsed = start.elapsed();
+            if !res.is_nil() {
+                println!("{}", crate::io::format_k(&res));
+            }
+            println!(
+                "Time: {} ms ({} us)",
+                elapsed.as_millis(),
+                elapsed.as_micros()
+            );
+            continue;
+        }
+
+        if trimmed.starts_with('\\') {
+            handle_system_command(trimmed, ktree);
+            continue;
+        }
+
+        accumulator.push_str(line);
+        accumulator.push('\n');
+
+        brace_depth += count_braces(line);
+        if brace_depth <= 0 {
+            let code = accumulator.trim();
+            if !code.is_empty() {
+                let words = crate::parser::parse(code)?;
+                let _ = crate::eval::eval_words(&words, &mut env, ktree)?;
+            }
+            accumulator.clear();
+            brace_depth = 0;
+        }
+    }
+
+    if !accumulator.trim().is_empty() {
+        let words = crate::parser::parse(&accumulator)?;
+        let _ = crate::eval::eval_words(&words, &mut env, ktree)?;
+    }
+
+    Ok(())
+}
+
+pub fn handle_system_command(cmd: &str, ktree: &Arc<KTree>) {
+    let trimmed = cmd.trim();
+    if trimmed == "\\\\" {
+        std::process::exit(0);
+    }
+    if trimmed == "\\" || trimmed == "\\?" || trimmed == "\\help" {
+        println!("System commands:");
+        println!("  \\\\         - Exit the interpreter");
+        println!("  \\+         - Show primitive verbs list and help");
+        println!("  \\/         - Show adverbs help");
+        println!("  \\v         - List all defined variables");
+        println!("  \\l file.k  - Load and run script file");
+        println!("  \\t expr    - Time execution of expression");
+        println!("  \\p [n]     - Show/set print precision");
+        println!("  \\r [seed]  - Show/set random seed");
+        println!("  \\s file.k  - Step-through run script file");
+        println!("  \\d [ns]    - Show/set namespace directory");
+        println!("  .\\`        - Show KTree hierarchy");
+        return;
+    }
+    if trimmed == "\\+" {
+        println!("Primitive Verbs:");
+        println!("  +  add/flip      -  subtract/negate  *  multiply/first  %  divide/reciprocal");
+        println!("  &  min/where     |  max/reverse      <  less/grade up   >  more/grade down");
+        println!("  =  equal/group   ~  match/not        ,  join/enlist     #  take/count");
+        println!("  _  drop/cut      !  key/enumerate    @  at/type         .  value/dot");
+        println!("  0: read/write text    1: read/write binary    2: load dynamic C library");
+        return;
+    }
+    if trimmed == "\\/" {
+        println!("Adverbs:");
+        println!("  /  over/scan");
+        println!("  \\  each/scan");
+        println!("  '  each-parallel");
+        return;
+    }
+    if trimmed == "\\v" {
+        let mut vars = ktree.keys();
+        vars.sort();
+        if vars.is_empty() {
+            println!("No global variables defined.");
+        } else {
+            println!("Defined global variables:");
+            for var in vars {
+                println!("  {}", var);
+            }
+        }
+        return;
+    }
+    if trimmed == ".\\`" {
+        let mut vars = ktree.keys();
+        vars.sort();
+        if vars.is_empty() {
+            println!("No variables defined.");
+        } else {
+            println!("KTree Hierarchy:");
+            for var in vars {
+                if let Some(val) = ktree.lookup(&var) {
+                    println!("  {} : {}", var, crate::io::format_k(&val));
+                }
+            }
+        }
+        return;
+    }
+    if trimmed.starts_with("\\l ") {
+        let path = trimmed["\\l ".len()..].trim();
+        if let Err(e) = load_and_run_script(path, ktree) {
+            eprintln!("Error loading script {}: {:?}", path, e);
+        }
+        return;
+    }
+    if trimmed.starts_with("\\s ") {
+        let path = trimmed["\\s ".len()..].trim();
+        STEP_SCRIPT.store(true, std::sync::atomic::Ordering::Relaxed);
+        let res = load_and_run_script(path, ktree);
+        STEP_SCRIPT.store(false, std::sync::atomic::Ordering::Relaxed);
+        if let Err(e) = res {
+            eprintln!("Error stepping script {}: {:?}", path, e);
+        }
+        return;
+    }
+    if trimmed.starts_with("\\d ") || trimmed == "\\d" {
+        if trimmed == "\\d" {
+            let current_d = ktree
+                .lookup("_d")
+                .and_then(|k| k.as_symbol().map(|s| s.to_string()))
+                .unwrap_or_else(|| ".k".to_string());
+            println!("{}", current_d);
+        } else {
+            let ns = trimmed["\\d ".len()..].trim();
+            let ns_sym = if ns.is_empty() {
+                ".k".to_string()
+            } else if ns.starts_with('.') {
+                ns.to_string()
+            } else {
+                format!(".{}", ns)
+            };
+            ktree.assign("_d".to_string(), K::symbol(ns_sym));
+        }
+        return;
+    }
+    if trimmed.starts_with("\\p ") || trimmed == "\\p" {
+        if trimmed == "\\p" {
+            let p = crate::io::PRINT_PRECISION.load(std::sync::atomic::Ordering::Relaxed);
+            println!("{}", p);
+        } else {
+            let arg = trimmed["\\p ".len()..].trim();
+            if let Ok(p) = arg.parse::<usize>() {
+                crate::io::PRINT_PRECISION.store(p, std::sync::atomic::Ordering::Relaxed);
+                ktree.assign("_p".to_string(), K::int(p as i64));
+            } else {
+                eprintln!("Invalid precision: {}", arg);
+            }
+        }
+        return;
+    }
+    if trimmed.starts_with("\\r ") || trimmed == "\\r" {
+        if trimmed == "\\r" {
+            let seed = crate::verbs::math::get_prng_seed();
+            println!("{}", seed);
+        } else {
+            let arg = trimmed["\\r ".len()..].trim();
+            if let Ok(seed) = arg.parse::<u64>() {
+                crate::verbs::math::set_prng_seed(seed);
+            } else {
+                eprintln!("Invalid seed: {}", arg);
+            }
+        }
+        return;
+    }
+
+    println!("Unknown system command: {}. Type \\ for help.", trimmed);
+}

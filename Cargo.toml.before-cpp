@@ -1,0 +1,13 @@
+[package]
+name = "kona"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bytemuck = { version = "1.25.2", optional = true }
+pollster = { version = "1.0.1", optional = true }
+wgpu = { version = "30.0.1", optional = true }
+
+[features]
+# GPU Kona: cargo build --release --features gpu   (plain cargo build = CPU-only Kona, no extra libraries)
+gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]

@@ -1,0 +1,799 @@
+Mismatch at line 543:
+  LHS code: (@[.:;"a: 1 1 1; a/[0] +: 10";:] )
+  RHS code: (1;"valence")
+  LHS val: K(GeneralList([K(IntAtom(1)), K(CharList([112, 97, 114, 115, 101]))]))
+  RHS val: K(GeneralList([K(IntAtom(1)), K(CharList([118, 97, 108, 101, 110, 99, 101]))]))
+--------------------
+RHS Error at line 590:
+  LHS code: 2
+  RHS code: a:2 3;a@*:0
+  Error: Type
+--------------------
+Mismatch at line 600:
+  LHS code: (1;"limit")
+  RHS code: @[.:;"!0I";:]
+  LHS val: K(GeneralList([K(IntAtom(1)), K(CharList([108, 105, 109, 105, 116]))]))
+  RHS val: K(GeneralList([K(IntAtom(1)), K(CharList([119, 115, 102, 117, 108, 108]))]))
+--------------------
+RHS Error at line 647:
+  LHS code: ("a";)
+  RHS code: "a",:[1;;"b"]
+  Error: Valence
+--------------------
+RHS Error at line 682:
+  LHS code: 0 1
+  RHS code: `one `two  _sm $`two
+  Error: Type
+--------------------
+RHS Error at line 687:
+  LHS code: 1 2
+  RHS code: a:.((`b;1);(`c;2)); `a[`b`c]
+  Error: Type
+--------------------
+RHS Error at line 688:
+  LHS code: 3
+  RHS code: a:1; \b:2; c:3
+  Error: Parse("Adverb missing operand")
+--------------------
+Mismatch at line 702:
+  LHS code: 6
+  RHS code: m:3 4#!12; m\[1;2]
+  LHS val: K(IntAtom(6))
+  RHS val: K(GeneralList([K(IntAtom(2)), K(IntList([8, 9, 10, 11]))]))
+--------------------
+RHS Error at line 703:
+  LHS code: 2
+  RHS code: m:3 4#!12; m\2
+  Error: Index
+--------------------
+Mismatch at line 705:
+  LHS code: 6
+  RHS code: m:3 4#!12; 1 m\2
+  LHS val: K(IntAtom(6))
+  RHS val: K(GeneralList([K(IntAtom(2)), K(IntList([8, 9, 10, 11]))]))
+--------------------
+RHS Error at line 711:
+  LHS code: 1968 880
+  RHS code: _mul[(3 5;1 3)]/[;1 0] 5
+  Error: Parse("Unknown monadic verb: _mul")
+--------------------
+Mismatch at line 716:
+  LHS code: .[{x};"2+2";:]
+  RHS code: (0;"2+2")
+  LHS val: K(GeneralList([K(IntAtom(1)), K(CharList([118, 97, 108, 101, 110, 99, 101]))]))
+  RHS val: K(GeneralList([K(IntAtom(0)), K(CharList([50, 43, 50]))]))
+--------------------
+Mismatch at line 717:
+  LHS code: .[{. x};"2+2";:]
+  RHS code: 0 4
+  LHS val: K(GeneralList([K(IntAtom(1)), K(CharList([118, 97, 108, 101, 110, 99, 101]))]))
+  RHS val: K(IntList([0, 4]))
+--------------------
+LHS Error at line 723:
+  LHS code: '"abc"
+  RHS code: "abc"
+  Error: Parse("Adverb missing operand")
+--------------------
+RHS Error at line 754:
+  LHS code: 1.618033988749908447
+  RHS code: ?[{(x^2)+(-x)+(-1)};0;1]
+  Error: Valence
+--------------------
+RHS Error at line 755:
+  LHS code: -0.6180339887194686854
+  RHS code: ?[{(x^2)+(-x)+(-1)};0;.25]
+  Error: Valence
+--------------------
+RHS Error at line 756:
+  LHS code: 0n -0i 0 0i
+  RHS code: v@<v:0. 0i -0i 0n
+  Error: Type
+--------------------
+Mismatch at line 757:
+  LHS code: 0 1 2 3
+  RHS code: <("aaa";"bb";,"c";"d")
+  LHS val: K(IntList([0, 1, 2, 3]))
+  RHS val: K(IntList([3, 0, 1, 2]))
+--------------------
+Mismatch at line 758:
+  LHS code: 0 1 3 2
+  RHS code: <("aaa";"bb";"c";,"d")
+  LHS val: K(IntList([0, 1, 3, 2]))
+  RHS val: K(IntList([2, 0, 1, 3]))
+--------------------
+Mismatch at line 761:
+  LHS code: 3 2 0 1
+  RHS code: >("ab";,"a";"aba";"a")
+  LHS val: K(IntList([3, 2, 0, 1]))
+  RHS val: K(IntList([2, 0, 1, 3]))
+--------------------
+Mismatch at line 764:
+  LHS code: 0 1 2
+  RHS code: <("";,"\000";" ")
+  LHS val: K(IntList([0, 1, 2]))
+  RHS val: K(IntList([2, 0, 1]))
+--------------------
+Mismatch at line 765:
+  LHS code: 2 1 0
+  RHS code: >("";,"\000";" ")
+  LHS val: K(IntList([2, 1, 0]))
+  RHS val: K(IntList([1, 0, 2]))
+--------------------
+Mismatch at line 766:
+  LHS code: 1 2 0
+  RHS code: <(" ";"";,"\000")
+  LHS val: K(IntList([1, 2, 0]))
+  RHS val: K(IntList([0, 1, 2]))
+--------------------
+Mismatch at line 767:
+  LHS code: 0 2 1
+  RHS code: >(" ";"";,"\000")
+  LHS val: K(IntList([0, 2, 1]))
+  RHS val: K(IntList([2, 1, 0]))
+--------------------
+RHS Error at line 776:
+  LHS code: 3
+  RHS code: c:2; .k["c+1"]
+  Error: Index
+--------------------
+RHS Error at line 777:
+  LHS code: 43
+  RHS code: c:2; d.c:42; d["c+1"]
+  Error: Value("Undefined variable: d")
+--------------------
+RHS Error at line 778:
+  LHS code: `a`b`c
+  RHS code: a:1;b:2;c:3; ."\v"
+  Error: Parse("Unexpected character: '\u{b}'")
+--------------------
+RHS Error at line 779:
+  LHS code: 2 2.0
+  RHS code: ?2. 1.9999999999999
+  Error: Type
+--------------------
+RHS Error at line 780:
+  LHS code: (,0;,1)
+  RHS code: =2. 1.9999999999999
+  Error: Type
+--------------------
+RHS Error at line 781:
+  LHS code: 0
+  RHS code: v:1.9999999999999 2.;v?2
+  Error: Type
+--------------------
+RHS Error at line 782:
+  LHS code: 0
+  RHS code: v:1.9999999999999 2.;v?2.
+  Error: Type
+--------------------
+RHS Error at line 783:
+  LHS code: 2
+  RHS code: v:1.9999999999999 2.;(v;_hash v)?2
+  Error: Type
+--------------------
+RHS Error at line 784:
+  LHS code: 1
+  RHS code: v:1.9999999999999 2.;(v;_hash v)?2.
+  Error: Type
+--------------------
+Mismatch at line 787:
+  LHS code: (,0)
+  RHS code: 0,/()
+  LHS val: K(IntList([0]))
+  RHS val: K(IntAtom(0))
+--------------------
+RHS Error at line 794:
+  LHS code: (,"alpha")
+  RHS code: " "\"alpha"
+  Error: Type
+--------------------
+RHS Error at line 795:
+  LHS code: ("";"lph";"")
+  RHS code: "a"\"alpha"
+  Error: Type
+--------------------
+RHS Error at line 796:
+  LHS code: (,"a";"pha")
+  RHS code: "l"\"alpha"
+  Error: Type
+--------------------
+RHS Error at line 797:
+  LHS code: ("";"";"";"")
+  RHS code: "a"\"aaa"
+  Error: Type
+--------------------
+LHS Error at line 798:
+  LHS code: x:.+(`a`b;1 2); y:x; f:{.[x;,`a;:;11]}; f`y; x
+  RHS code: .+(`a`b;1 2)
+  Error: Type
+--------------------
+LHS Error at line 799:
+  LHS code: x:.+(`a`b;1 2); y:x; f:{.[x;,`a;:;11]}; f`y; y
+  RHS code: .+(`a`b;11 2)
+  Error: Type
+--------------------
+Mismatch at line 807:
+  LHS code: 0n
+  RHS code: 0i+0N
+  LHS val: K(FloatAtom(NaN))
+  RHS val: K(FloatAtom(inf))
+--------------------
+Mismatch at line 809:
+  LHS code: 0n
+  RHS code: 0i-0I
+  LHS val: K(FloatAtom(NaN))
+  RHS val: K(FloatAtom(inf))
+--------------------
+Mismatch at line 811:
+  LHS code: 0n
+  RHS code: 0i-0N
+  LHS val: K(FloatAtom(NaN))
+  RHS val: K(FloatAtom(inf))
+--------------------
+RHS Error at line 915:
+  LHS code: 7
+  RHS code: 4:(`a 1 \ )
+  Error: Type
+--------------------
+RHS Error at line 921:
+  LHS code: `a
+  RHS code: .(`a;();:;22)
+  Error: Type
+--------------------
+RHS Error at line 926:
+  LHS code: `b
+  RHS code: .[`b;();:;33]
+  Error: Value("Undefined variable: b")
+--------------------
+RHS Error at line 927:
+  LHS code: 33
+  RHS code: ..[`b;();:;33]
+  Error: Value("Undefined variable: b")
+--------------------
+RHS Error at line 928:
+  LHS code: 1+2 3
+  RHS code: ..[`b;();:;3 4]
+  Error: Value("Undefined variable: b")
+--------------------
+Mismatch at line 931:
+  LHS code: `b
+  RHS code: b:1;.[`b;();-:]
+  LHS val: K(SymbolAtom("b"))
+  RHS val: K(IntAtom(-1))
+--------------------
+RHS Error at line 932:
+  LHS code: 33
+  RHS code: b:33;..[`b;()]
+  Error: Type
+--------------------
+RHS Error at line 933:
+  LHS code: -33
+  RHS code: b:33; ..[`b;();-:]
+  Error: Type
+--------------------
+RHS Error at line 942:
+  LHS code: _n
+  RHS code: a:
+  Error: Parse("parse")
+--------------------
+RHS Error at line 945:
+  LHS code: -12
+  RHS code: .(10;();:;-12)
+  Error: Type
+--------------------
+RHS Error at line 946:
+  LHS code: -3
+  RHS code: z:1;z+:2;z-:
+  Error: Parse("parse")
+--------------------
+RHS Error at line 954:
+  LHS code: -1 -2 -3
+  RHS code: a:1 2 3; a -:
+  Error: Parse("parse")
+--------------------
+RHS Error at line 957:
+  LHS code: 2
+  RHS code: a: 1 2 3; 1-a[0]-:
+  Error: Parse("parse")
+--------------------
+Mismatch at line 958:
+  LHS code: -1
+  RHS code: a: 1 2 3; 1-a[0]-:;a[0]
+  LHS val: K(IntAtom(-1))
+  RHS val: K(IntAtom(1))
+--------------------
+Mismatch at line 962:
+  LHS code: 8
+  RHS code: a:0;z:((1 2;3 4);(5 6;7 8);(9 10;11 12));z[a][a][a:1]
+  LHS val: K(IntAtom(8))
+  RHS val: K(IntAtom(2))
+--------------------
+RHS Error at line 964:
+  LHS code: (1 2;3 4)
+  RHS code: ( 1 2 \n 3 4)
+  Error: Value("Undefined variable: n")
+--------------------
+Mismatch at line 975:
+  LHS code: 1
+  RHS code: +\1
+  LHS val: K(IntAtom(1))
+  RHS val: K(IntList([1]))
+--------------------
+Mismatch at line 980:
+  LHS code: 0 8
+  RHS code: a:0;z:((1 2;3 4);(5 6;7 8);(9 10;11 12));a,(z+a:0)[a][a][a:1]
+  LHS val: K(IntList([0, 8]))
+  RHS val: K(IntList([1, 2]))
+--------------------
+RHS Error at line 993:
+  LHS code: 6
+  RHS code: f:|/0(0|+)\; f 2 1 -4 2 -1 5
+  Error: Type
+--------------------
+RHS Error at line 994:
+  LHS code: 5#45
+  RHS code: f:|/0(0|+)\; a:!10; (f (!10); f[!10]; f a; f @ a; f .,a)
+  Error: Type
+--------------------
+RHS Error at line 1017:
+  LHS code: (2 7;-23)
+  RHS code: 2 4 -23 8 7 @ (0 4; 2)
+  Error: Type
+--------------------
+Mismatch at line 1019:
+  LHS code: (1;(+;102))
+  RHS code: f:+; (@f;(f;102))
+  LHS val: K(GeneralList([K(IntAtom(1)), K(GeneralList([K(Function(Primitive("+"))), K(IntAtom(102))]))]))
+  RHS val: K(GeneralList([K(IntAtom(0)), K(GeneralList([K(Function(Primitive("+"))), K(IntAtom(102))]))]))
+--------------------
+RHS Error at line 1021:
+  LHS code: 4 3
+  RHS code: ^ (1 2 3; "abc"; `x `y `z; 5.4 1.2 -3.56)
+  Error: Type
+--------------------
+RHS Error at line 1022:
+  LHS code: 2 3 2
+  RHS code: ^ ((1 2; `a `b; "AB"); ("CD"; 3 4; `c `d))
+  Error: Type
+--------------------
+RHS Error at line 1023:
+  LHS code: 2 3
+  RHS code: ^ ((0 1 2; `a; "AB"); ("CD"; 3 4; `c `d))
+  Error: Type
+--------------------
+RHS Error at line 1030:
+  LHS code: ((9;"a";"b";"c");(8;1.5;`xyz);(7;100;3.76;`efgh))
+  RHS code: d:9 8 7; i:(0;(1;2 2)); y: ("abc";((1.5;`xyz);(100;(3.76;`efgh)))); @[d;i;,;y]
+  Error: Type
+--------------------
+Mismatch at line 1040:
+  LHS code: 0.0 0i
+  RHS code: 0.0 0I
+  LHS val: K(FloatList([0.0, inf]))
+  RHS val: K(FloatList([0.0, 9.223372036854776e18]))
+--------------------
+Mismatch at line 1047:
+  LHS code: 1
+  RHS code: @{x+y}
+  LHS val: K(IntAtom(1))
+  RHS val: K(Function(Composition { f: K(Function(Primitive("@"))), g: K(Function(UserDefined { body: "x+y", args: ["x", "y"], code: Some([Name("x"), Verb("+"), Name("y")]), env: None })) }))
+--------------------
+Mismatch at line 1050:
+  LHS code: 1
+  RHS code: @ .((`a;2);(`b;3))
+  LHS val: K(IntAtom(1))
+  RHS val: K(IntAtom(0))
+--------------------
+Mismatch at line 1059:
+  LHS code: 7
+  RHS code: 0 _ 7
+  LHS val: K(IntAtom(7))
+  RHS val: K(IntList([7]))
+--------------------
+Mismatch at line 1060:
+  LHS code: ""
+  RHS code: 88 _ ""
+  LHS val: K(CharList([]))
+  RHS val: K(GeneralList([]))
+--------------------
+Mismatch at line 1061:
+  LHS code: !0
+  RHS code: 9 _ !6
+  LHS val: K(IntList([]))
+  RHS val: K(GeneralList([]))
+--------------------
+Mismatch at line 1066:
+  LHS code: (!0;1 2;3 4 5)
+  RHS code: 1 1 3 _ !6
+  LHS val: K(GeneralList([K(IntList([])), K(IntList([1, 2])), K(IntList([3, 4, 5]))]))
+  RHS val: K(GeneralList([K(GeneralList([])), K(IntList([1, 2])), K(IntList([3, 4, 5]))]))
+--------------------
+Mismatch at line 1079:
+  LHS code: 2
+  RHS code: (8 16; "abcdef"; 4 9 2; `x`y`z`w; 4 9 2) ? 4 9 2
+  LHS val: K(IntAtom(2))
+  RHS val: K(IntList([5, 5, 5]))
+--------------------
+Mismatch at line 1080:
+  LHS code: 2 6
+  RHS code: words:("canoe";"tug";"raft";"rowboat";"ark";"liner"); (words?"raft";words?"submarine")
+  LHS val: K(IntList([2, 6]))
+  RHS val: K(GeneralList([K(IntList([6, 6, 6, 6])), K(IntList([6, 6, 6, 6, 6, 6, 6, 6, 6]))]))
+--------------------
+Mismatch at line 1085:
+  LHS code: 0
+  RHS code: *!0
+  LHS val: K(IntAtom(0))
+  RHS val: K(Nil)
+--------------------
+Mismatch at line 1086:
+  LHS code: 0.0
+  RHS code: *0#0.0
+  LHS val: K(FloatAtom(0.0))
+  RHS val: K(Nil)
+--------------------
+Mismatch at line 1087:
+  LHS code: " "
+  RHS code: *0#""
+  LHS val: K(CharAtom(' '))
+  RHS val: K(Nil)
+--------------------
+Mismatch at line 1088:
+  LHS code: `
+  RHS code: *0#`
+  LHS val: K(SymbolAtom(""))
+  RHS val: K(Nil)
+--------------------
+RHS Error at line 1093:
+  LHS code: ((1;"C";`x);(2;"C";`y);(3;"C";`z))
+  RHS code: +(1 2 3;"C";`x`y`z)
+  Error: Length
+--------------------
+Mismatch at line 1097:
+  LHS code: {x*y}
+  RHS code: +{x*y}
+  LHS val: K(Function(UserDefined { body: "x*y", args: ["x", "y"], code: Some([Name("x"), Verb("*"), Name("y")]), env: None }))
+  RHS val: K(Function(Composition { f: K(Function(Primitive("+"))), g: K(Function(UserDefined { body: "x*y", args: ["x", "y"], code: Some([Name("x"), Verb("*"), Name("y")]), env: None })) }))
+--------------------
+Mismatch at line 1111:
+  LHS code: "{x}"
+  RHS code: ${x}
+  LHS val: K(CharList([123, 120, 125]))
+  RHS val: K(Function(Composition { f: K(Function(Primitive("$"))), g: K(Function(UserDefined { body: "x", args: ["x"], code: Some([Name("x")]), env: None })) }))
+--------------------
+RHS Error at line 1117:
+  LHS code: "**"
+  RHS code: 2$2.345
+  Error: Type
+--------------------
+RHS Error at line 1118:
+  LHS code: "   abcd"
+  RHS code: 7$`abcd
+  Error: Type
+--------------------
+Mismatch at line 1119:
+  LHS code: "   2.35"
+  RHS code: 7.2 $ 2.345
+  LHS val: K(CharList([32, 32, 32, 50, 46, 51, 53]))
+  RHS val: K(FloatAtom(2.345))
+--------------------
+Mismatch at line 1120:
+  LHS code: " 714.00"
+  RHS code: 7.2 $ 714
+  LHS val: K(CharList([32, 55, 49, 52, 46, 48, 48]))
+  RHS val: K(FloatAtom(714.0))
+--------------------
+Mismatch at line 1122:
+  LHS code: "1.2e-34"
+  RHS code: $ 1.2e-34
+  LHS val: K(CharList([49, 46, 50, 101, 45, 51, 52]))
+  RHS val: K(CharList([48, 46, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 49, 50]))
+--------------------
+Mismatch at line 1123:
+  LHS code: "2.35e+00 "
+  RHS code: -9.2 $ 2.345
+  LHS val: K(CharList([50, 46, 51, 53, 101, 43, 48, 48, 32]))
+  RHS val: K(FloatAtom(2.345))
+--------------------
+Mismatch at line 1124:
+  LHS code: "7.14e+02 "
+  RHS code: -9.2 $ 714
+  LHS val: K(CharList([55, 46, 49, 52, 101, 43, 48, 50, 32]))
+  RHS val: K(FloatAtom(714.0))
+--------------------
+Mismatch at line 1126:
+  LHS code: "1.2e-034"
+  RHS code: $ 1.2e-34
+  LHS val: K(CharList([49, 46, 50, 101, 45, 48, 51, 52]))
+  RHS val: K(CharList([48, 46, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 49, 50]))
+--------------------
+Mismatch at line 1127:
+  LHS code: "2.35e+000"
+  RHS code: $ -9.2 $ 2.345
+  LHS val: K(CharList([50, 46, 51, 53, 101, 43, 48, 48, 48]))
+  RHS val: K(CharList([50, 46, 51, 52, 53]))
+--------------------
+Mismatch at line 1128:
+  LHS code: "7.14e+002"
+  RHS code: $ -9.2 $ 714
+  LHS val: K(CharList([55, 46, 49, 52, 101, 43, 48, 48, 50]))
+  RHS val: K(CharList([55, 49, 52]))
+--------------------
+RHS Error at line 1133:
+  LHS code: "ab"
+  RHS code: " "$"ab"
+  Error: Type
+--------------------
+RHS Error at line 1135:
+  LHS code: (23;(23.4;`abc))
+  RHS code: (0;(0.0;`)) $ ("23";("23.4";"abc"))
+  Error: Type
+--------------------
+RHS Error at line 1136:
+  LHS code: 4#$ _log 2
+  RHS code: 4#$ (_exp) ? 2
+  Error: Type
+--------------------
+RHS Error at line 1137:
+  LHS code: 4#$_sqrt 2
+  RHS code: 4#$ {x^2} ? 2
+  Error: Type
+--------------------
+RHS Error at line 1142:
+  LHS code: 2 1 0
+  RHS code: > `aaa `bb `c
+  Error: Type
+--------------------
+RHS Error at line 1153:
+  LHS code: ("fa";("d";,"ed"))
+  RHS code: "abcdefg"@(5 0;(3;,4 3))
+  Error: Type
+--------------------
+RHS Error at line 1154:
+  LHS code: ((7 4 9 2;3 5);(3 5;7 4 9 2;8 1 6))
+  RHS code: (8 1 6;3 5;7 4 9 2) @ ( 2 1; 1 2 0)
+  Error: Type
+--------------------
+Mismatch at line 1200:
+  LHS code: ~`c
+  RHS code: `c.
+  LHS val: K(IntAtom(0))
+  RHS val: K(Function(Projection { func: K(Function(Primitive("."))), args: [Some(K(SymbolAtom("c"))), None] }))
+--------------------
+RHS Error at line 1228:
+  LHS code: ("  0";"0.1")
+  RHS code: 3 $  1.8 -2.7 ! 0.2
+  Error: Type
+--------------------
+Mismatch at line 1246:
+  LHS code: 2 3 4 0
+  RHS code: ^ 2 3 4 0 7 8 # "abc"
+  LHS val: K(IntList([2, 3, 4, 0]))
+  RHS val: K(IntList([]))
+--------------------
+Mismatch at line 1247:
+  LHS code: ("ab";"cd")
+  RHS code: 2 -1 # "abcd"
+  LHS val: K(GeneralList([K(CharList([97, 98])), K(CharList([99, 100]))]))
+  RHS val: K(GeneralList([]))
+--------------------
+Mismatch at line 1248:
+  LHS code: ("abcd";"efgh")
+  RHS code: 2 -1 # "abcdefgh"
+  LHS val: K(GeneralList([K(CharList([97, 98, 99, 100])), K(CharList([101, 102, 103, 104]))]))
+  RHS val: K(GeneralList([]))
+--------------------
+Mismatch at line 1249:
+  LHS code: 2 2
+  RHS code: ^ 2 -1 # "abcd"
+  LHS val: K(IntList([2, 2]))
+  RHS val: K(IntList([]))
+--------------------
+Mismatch at line 1250:
+  LHS code: 2 4
+  RHS code: ^ 2 -1 # "abcdefgh"
+  LHS val: K(IntList([2, 4]))
+  RHS val: K(IntList([]))
+--------------------
+Mismatch at line 1251:
+  LHS code: (,"abc";,"def")
+  RHS code: 2 -1 3 # "abcdef"
+  LHS val: K(GeneralList([K(GeneralList([K(CharList([97, 98, 99]))])), K(GeneralList([K(CharList([100, 101, 102]))]))]))
+  RHS val: K(GeneralList([]))
+--------------------
+Mismatch at line 1252:
+  LHS code: (("abc";"def");("ghi";"jkl"))
+  RHS code: 2 -1 3 # "abcdefghijkl"
+  LHS val: K(GeneralList([K(GeneralList([K(CharList([97, 98, 99])), K(CharList([100, 101, 102]))])), K(GeneralList([K(CharList([103, 104, 105])), K(CharList([106, 107, 108]))]))]))
+  RHS val: K(GeneralList([]))
+--------------------
+Mismatch at line 1253:
+  LHS code: 2 1 3
+  RHS code: ^ 2 -1 3 # "abcdef"
+  LHS val: K(IntList([2, 1, 3]))
+  RHS val: K(IntList([]))
+--------------------
+Mismatch at line 1254:
+  LHS code: 2 2 3
+  RHS code: ^ 2 -1 3 # "abcdefghijkl"
+  LHS val: K(IntList([2, 2, 3]))
+  RHS val: K(IntList([]))
+--------------------
+RHS Error at line 1278:
+  LHS code: `a,''`b
+  RHS code: `a `b
+  Error: Type
+--------------------
+Mismatch at line 1284:
+  LHS code: 7
+  RHS code: 1 7 2 4 6 10 3 ? 4 3
+  LHS val: K(IntAtom(7))
+  RHS val: K(IntList([3, 6]))
+--------------------
+Mismatch at line 1296:
+  LHS code: "aeh"
+  RHS code: m:3 3#"abcdefghi"; f:m@'; f 0 1 1
+  LHS val: K(CharList([97, 101, 104]))
+  RHS val: K(GeneralList([K(CharList([97, 98, 99])), K(CharList([100, 101, 102])), K(CharList([100, 101, 102]))]))
+--------------------
+Mismatch at line 1297:
+  LHS code: ("aeh";"aei")
+  RHS code: m:3 3#"abcdefghi"; f:m@'; f'(0 1 1;0 1 2)
+  LHS val: K(GeneralList([K(CharList([97, 101, 104])), K(CharList([97, 101, 105]))]))
+  RHS val: K(GeneralList([K(GeneralList([K(CharList([97, 98, 99])), K(CharList([100, 101, 102])), K(CharList([100, 101, 102]))])), K(GeneralList([K(CharList([97, 98, 99])), K(CharList([100, 101, 102])), K(CharList([103, 104, 105]))]))]))
+--------------------
+Mismatch at line 1301:
+  LHS code: (0 2 4;1 3 5)
+  RHS code: b: 3 2 # ! 6; r: b +:; b
+  LHS val: K(GeneralList([K(IntList([0, 2, 4])), K(IntList([1, 3, 5]))]))
+  RHS val: K(GeneralList([K(IntList([0, 1])), K(IntList([2, 3])), K(IntList([4, 5]))]))
+--------------------
+Mismatch at line 1302:
+  LHS code: ((101 2 103;103 4 105);(103 105;101 103))
+  RHS code: a:(1 2 3;3 4 5); r: a[1 0;0 2] +: 100; (a;r)
+  LHS val: K(GeneralList([K(GeneralList([K(IntList([101, 2, 103])), K(IntList([103, 4, 105]))])), K(GeneralList([K(IntList([103, 105])), K(IntList([101, 103]))]))]))
+  RHS val: K(GeneralList([K(GeneralList([K(IntList([101, 2, 103])), K(IntList([103, 4, 105]))])), K(GeneralList([K(IntList([103, 4, 105])), K(IntList([101, 2, 103]))]))]))
+--------------------
+Mismatch at line 1303:
+  LHS code: (10 11 12 13;(`ab;"cde");-8 -9 -10 -11)
+  RHS code: a:3 4#!12; a[1]:(`ab;"cde"); a[0]+:10;a[2] -:;a
+  LHS val: K(GeneralList([K(IntList([10, 11, 12, 13])), K(GeneralList([K(SymbolAtom("ab")), K(CharList([99, 100, 101]))])), K(IntList([-8, -9, -10, -11]))]))
+  RHS val: K(GeneralList([K(IntList([10, 11, 12, 13])), K(GeneralList([K(SymbolAtom("ab")), K(CharList([99, 100, 101]))])), K(IntList([8, 9, 10, 11]))]))
+--------------------
+RHS Error at line 1306:
+  LHS code: .((`a;1;)
+  (`b;1;)
+  (`c;1;))
+  RHS code: a[`a`b`c]:1;a
+  Error: Value("Undefined variable: a")
+--------------------
+RHS Error at line 1307:
+  LHS code: 10 20 30
+  RHS code: a:3 3#!9; a[;1]:10 20 30
+  Error: Type
+--------------------
+Mismatch at line 1326:
+  LHS code: 0
+  RHS code: 4 3 _in 1 7 2 4 6 3
+  LHS val: K(IntAtom(0))
+  RHS val: K(IntList([1, 1]))
+--------------------
+Mismatch at line 1366:
+  LHS code: (1;"domain")
+  RHS code: @[.:;".`\"1\"";:]
+  LHS val: K(GeneralList([K(IntAtom(1)), K(CharList([100, 111, 109, 97, 105, 110]))]))
+  RHS val: K(GeneralList([K(IntAtom(1)), K(CharList([118, 97, 108, 117, 101]))]))
+--------------------
+Mismatch at line 1367:
+  LHS code: (1;"domain")
+  RHS code: @[.:;".`\" \"";:]
+  LHS val: K(GeneralList([K(IntAtom(1)), K(CharList([100, 111, 109, 97, 105, 110]))]))
+  RHS val: K(GeneralList([K(IntAtom(1)), K(CharList([118, 97, 108, 117, 101]))]))
+--------------------
+Mismatch at line 1368:
+  LHS code: (1;"domain")
+  RHS code: @[.:;".`\"Ŕ̡̢͘͝x̀2́̀H̨̀͘l͘͞͞͠v̶̡͘͡k̷̡͞͝ ̛(̨͏͏͞Q̧͏y̵̴͘͠͡,̶̴̴̕͞\"";:]
+  LHS val: K(GeneralList([K(IntAtom(1)), K(CharList([100, 111, 109, 97, 105, 110]))]))
+  RHS val: K(GeneralList([K(IntAtom(1)), K(CharList([118, 97, 108, 117, 101]))]))
+--------------------
+RHS Error at line 1370:
+  LHS code: _n
+  RHS code: .`"f"
+  Error: Value("Undefined variable: f")
+--------------------
+RHS Error at line 1371:
+  LHS code: _n
+  RHS code: .`".f"
+  Error: Value("Undefined variable: .f")
+--------------------
+RHS Error at line 1372:
+  LHS code: _n
+  RHS code: .`".k.xyz"
+  Error: Value("Undefined variable: .k.xyz")
+--------------------
+RHS Error at line 1373:
+  LHS code: _n
+  RHS code: .`".k.xyz."
+  Error: Value("Undefined variable: .k.xyz.")
+--------------------
+RHS Error at line 1374:
+  LHS code: _n
+  RHS code: .`".k.xyz.b"
+  Error: Value("Undefined variable: .k.xyz.b")
+--------------------
+RHS Error at line 1375:
+  LHS code: _n
+  RHS code: .`".k.xyz..b"
+  Error: Value("Undefined variable: .k.xyz..b")
+--------------------
+RHS Error at line 1382:
+  LHS code: "that"
+  RHS code: _ssr["this";"is";,"at"]
+  Error: Type
+--------------------
+RHS Error at line 1384:
+  LHS code: "asdf"
+  RHS code: _ssr["gsdf";"g";,"a"]
+  Error: Type
+--------------------
+RHS Error at line 1385:
+  LHS code: "asdf"
+  RHS code: _ssr["gsdf";"g";"a"]
+  Error: Type
+--------------------
+RHS Error at line 1386:
+  LHS code: "ebcde"
+  RHS code: _ssr["abcda";"a";"e"]
+  Error: Type
+--------------------
+RHS Error at line 1405:
+  LHS code: 4
+  RHS code: (:1\n:2\n:3\n:4)
+  Error: Rank
+--------------------
+Mismatch at line 1406:
+  LHS code: 1
+  RHS code: {:1\n:2\n:[:4;:5]\n:6}0
+  LHS val: K(IntAtom(1))
+  RHS val: K(IntAtom(4))
+--------------------
+RHS Error at line 1433:
+  LHS code: "abcd"
+  RHS code: ("abcd";"efgh")/0
+  Error: Type
+--------------------
+RHS Error at line 1434:
+  LHS code: "efgh"
+  RHS code: ("abcd";"efgh")/1
+  Error: Type
+--------------------
+RHS Error at line 1435:
+  LHS code: "b"
+  RHS code: ("abcd";"efgh")/0 1
+  Error: Type
+--------------------
+RHS Error at line 1436:
+  LHS code: "g"
+  RHS code: ("abcd";"efgh")/1 2
+  Error: Type
+--------------------
+Mismatch at line 1450:
+  LHS code: (1;"syntax")
+  RHS code: @[.:;"0-8^-4&1/::=-";:]
+  LHS val: K(GeneralList([K(IntAtom(1)), K(CharList([115, 121, 110, 116, 97, 120]))]))
+  RHS val: K(GeneralList([K(IntAtom(1)), K(CharList([116, 121, 112, 101]))]))
+--------------------
+RHS Error at line 1452:
+  LHS code: (0 0;0 1;1 0;1 1)
+  RHS code: !2 2
+  Error: Type
+--------------------
+RHS Error at line 1453:
+  LHS code: a:2 1 3; a _vs/:!*/a
+  RHS code: !2 1 3
+  Error: Type
+--------------------
+RHS Error at line 1454:
+  LHS code: a:2 1 3; a _vsx/:!*/a
+  RHS code: !2 1 3
+  Error: Type

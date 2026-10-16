@@ -1,0 +1,16 @@
+Made by Claude
+
+kona-rust-2026 - zipped 2026-10-16 from D:\kona-rust-2026 (the user's Rust port of Kona)
+
+bin\kona.exe        the built interpreter as used for all of 2026-10-16's benches (cargo build --release --features "gpu cpp":
+                    GPU verbs _gup _gk _grun _gdown _gfree, the _sys door with BCPL / C++ / GPU, kwire sockets)
+cpp\kgame_server.exe  the C++ library "next door" (_sys library 3), built by build.rs
+src\                the port's source;  CHANGES_2026-10-15.md = what changed on 10-15 (speed, threads, pool, GPU, door)
+ue\                 kona_ue: Kona as a static library for Unreal (cxx bridge)
+cpp\ gpu_tests\ bench\ docs\   C++ side, GPU kernels + tests, bench K scripts, notes
+*.before-*          backups kept from earlier changes
+
+Left out: target\ and ue\target\ (1.1 GB of build leftovers - rebuild with cargo).
+The 2026-10-16 test results and the K scripts that ran on it: D:\kona-rust-results-20261016
+
+Made by Claude
