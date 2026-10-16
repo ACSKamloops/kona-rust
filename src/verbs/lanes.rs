@@ -205,12 +205,17 @@ macro_rules! as_floats {
     };
 }
 
-/// < > = as 0/1 ints: the tolerant compare fc on the float values, same as compare_numeric
+/// < > = as 0/1 ints. Two int sides compare exactly, as C Kona does (1700000000000000000 =
+/// 1700000000000100000 is 0; through i2f+fc it was 1); a float side uses the tolerant fc, same as
+/// compare_numeric.
 fn compares(verb: &str, n: usize, x: Num<'_>, y: Num<'_>) -> Option<K> {
-    let r: Vec<i64> = match verb {
-        "<" => as_floats!(n, x, y, |a, b| (fc(a, b) < 0) as i64),
-        ">" => as_floats!(n, x, y, |a, b| (fc(a, b) > 0) as i64),
-        "=" => as_floats!(n, x, y, |a, b| (fc(a, b) == 0) as i64),
+    let r: Vec<i64> = match (verb, x, y) {
+        ("<", Num::I(p), Num::I(q)) => map2(n, p, q, |a: i64, b: i64| (a < b) as i64),
+        (">", Num::I(p), Num::I(q)) => map2(n, p, q, |a: i64, b: i64| (a > b) as i64),
+        ("=", Num::I(p), Num::I(q)) => map2(n, p, q, |a: i64, b: i64| (a == b) as i64),
+        ("<", x, y) => as_floats!(n, x, y, |a, b| (fc(a, b) < 0) as i64),
+        (">", x, y) => as_floats!(n, x, y, |a, b| (fc(a, b) > 0) as i64),
+        ("=", x, y) => as_floats!(n, x, y, |a, b| (fc(a, b) == 0) as i64),
         _ => return None,
     };
     Some(K::int_list(r))

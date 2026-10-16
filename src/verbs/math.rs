@@ -234,8 +234,9 @@ pub fn not(x: &K) -> Result<K, KonaError> {
 }
 
 pub(crate) fn k_mod_int(x: i64, y: i64) -> Result<i64, KonaError> {
+    // C Kona (va.c mod): a zero divisor returns the dividend unchanged, 5 ! 0 is 5
     if y == 0 {
-        return Err(KonaError::Domain);
+        return Ok(x);
     }
     if x == i64::MIN && y == -1 {
         return Err(KonaError::Domain);
@@ -259,7 +260,7 @@ pub(crate) fn k_mod_int(x: i64, y: i64) -> Result<i64, KonaError> {
 
 pub(crate) fn k_mod_float(x: f64, y: f64) -> Result<f64, KonaError> {
     if y == 0.0 {
-        return Err(KonaError::Domain);
+        return Ok(x);
     }
     Ok(x - y * (x / y).floor())
 }
@@ -753,12 +754,64 @@ pub fn set_prng_seed(seed: u64) {
     *PRNG_SEED.lock().unwrap() = seed;
 }
 
+/// One step of the generator. The state advances as a 64-bit LCG (so a \r seed still fixes the sequence)
+/// but the number handed out is the splitmix64 mix of that state. The old code sampled `state % n`
+/// straight off the LCG, and the low bits of a power-of-two LCG are periodic - bit 0 alternates, so
+/// `10 _draw 2` was 1 0 1 0 1 0 1 0 1 0 every time and `10 _draw 4` cycled 2 1 0 3. (Made by Claude)
+fn rand_next(rng: &mut u64) -> u64 {
+    *rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    let mut z = *rng;
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+    z ^ (z >> 31)
+}
+
+/// Uniform integer in 0..n (n > 0) from the top bits: no modulo bias, no low-bit patterns
+fn rand_below(rng: &mut u64, n: usize) -> usize {
+    ((rand_next(rng) as u128 * n as u128) >> 64) as usize
+}
+
+/// Uniform float in [0,1) from the top 53 bits
+fn rand_unit(rng: &mut u64) -> f64 {
+    (rand_next(rng) >> 11) as f64 / (1u64 << 53) as f64
+}
+
+/// -n _draw m deals n distinct indices below m: a sparse Fisher-Yates, so -5 _draw 1000000000 is O(5)
+fn deal_indices(rng: &mut u64, count: usize, pool_size: usize) -> Vec<usize> {
+    let mut chosen = Vec::with_capacity(count);
+    let mut pool_map = std::collections::HashMap::new();
+    for i in 0..count {
+        let j = i + rand_below(rng, pool_size - i);
+        let val_i = pool_map.get(&i).copied().unwrap_or(i);
+        let val_j = pool_map.get(&j).copied().unwrap_or(j);
+        chosen.push(val_j);
+        pool_map.insert(j, val_i);
+    }
+    chosen
+}
+
 pub fn draw_verb(a: &K, b: &K) -> Result<K, KonaError> {
+    // a shape on the left draws the product and reshapes it: 2 3 _draw 10 is a 2x3 matrix (C Kona r.c)
+    if let KData::IntList(dims) = &**a {
+        if dims.iter().any(|&d| d < 0) {
+            return Err(KonaError::Int);
+        }
+        let total = dims
+            .iter()
+            .try_fold(1i64, |acc, &d| acc.checked_mul(d))
+            .ok_or(KonaError::WsFull)?;
+        let flat = draw_verb(&K::int(total), b)?;
+        return crate::verbs::list::take(a, &flat);
+    }
     let n = a.as_int().ok_or(KonaError::Type)?;
     if n == i64::MIN {
         return Err(KonaError::Domain);
     }
-    let count = n.abs() as usize;
+    let count = n.unsigned_abs() as usize;
+    if count >= 2147483647 {
+        // like enumerate: a wsfull error, not an aborted process from Vec::with_capacity
+        return Err(KonaError::WsFull);
+    }
     let deal = n < 0;
 
     let mut seed_guard = PRNG_SEED
@@ -783,48 +836,26 @@ pub fn draw_verb(a: &K, b: &K) -> Result<K, KonaError> {
         if deal && count > pool_size {
             return Err(KonaError::Domain);
         }
-        let mut chosen = Vec::with_capacity(count);
-        if deal {
-            let mut pool_map = std::collections::HashMap::new();
-            for i in 0..count {
-                rng = rng.wrapping_mul(1664525).wrapping_add(1013904223);
-                let j = i + (rng % (pool_size - i) as u64) as usize;
-                let val_i = pool_map.get(&i).copied().unwrap_or(i);
-                let val_j = pool_map.get(&j).copied().unwrap_or(j);
-                chosen.push(val_j);
-                pool_map.insert(j, val_i);
-            }
+        let chosen = if deal {
+            deal_indices(&mut rng, count, pool_size)
         } else {
-            for _ in 0..count {
-                rng = rng.wrapping_mul(1664525).wrapping_add(1013904223);
-                let idx = (rng % pool_size as u64) as usize;
-                chosen.push(idx);
-            }
-        }
+            (0..count).map(|_| rand_below(&mut rng, pool_size)).collect()
+        };
         let res_atoms: Vec<K> = chosen.iter().map(|&idx| b_atoms[idx].clone()).collect();
         normalize_list(res_atoms)
     } else if let Some(f) = b.as_float() {
-        let mut res = Vec::with_capacity(count);
-        for _ in 0..count {
-            rng = rng.wrapping_mul(1664525).wrapping_add(1013904223);
-            let val = (rng as f64) / (u64::MAX as f64) * f;
-            res.push(val);
-        }
+        let res: Vec<f64> = (0..count).map(|_| rand_unit(&mut rng) * f).collect();
         K::float_list_raw(res)
     } else {
         let m = b.as_int().ok_or(KonaError::Type)?;
         if m == i64::MIN {
             return Err(KonaError::Domain);
         }
-        let pool_size = m.abs() as usize;
+        let pool_size = m.unsigned_abs() as usize;
         let deal = deal || m < 0;
         if pool_size == 0 && !deal {
-            // n _draw 0 = n random floats in [0,1), as in C Kona (top 53 bits of the generator / 2^53)
-            let mut res = Vec::with_capacity(count);
-            for _ in 0..count {
-                rng = rng.wrapping_mul(1664525).wrapping_add(1013904223);
-                res.push((rng >> 11) as f64 / (1u64 << 53) as f64);
-            }
+            // n _draw 0 = n random floats in [0,1), as in C Kona
+            let res: Vec<f64> = (0..count).map(|_| rand_unit(&mut rng)).collect();
             *seed_guard = rng;
             return Ok(K::float_list_raw(res));
         }
@@ -834,24 +865,11 @@ pub fn draw_verb(a: &K, b: &K) -> Result<K, KonaError> {
         if deal && count > pool_size {
             return Err(KonaError::Domain);
         }
-        let mut chosen = Vec::with_capacity(count);
-        if deal {
-            let mut pool_map = std::collections::HashMap::new();
-            for i in 0..count {
-                rng = rng.wrapping_mul(1664525).wrapping_add(1013904223);
-                let j = i + (rng % (pool_size - i) as u64) as usize;
-                let val_i = pool_map.get(&i).copied().unwrap_or(i);
-                let val_j = pool_map.get(&j).copied().unwrap_or(j);
-                chosen.push(val_j);
-                pool_map.insert(j, val_i);
-            }
+        let chosen = if deal {
+            deal_indices(&mut rng, count, pool_size)
         } else {
-            for _ in 0..count {
-                rng = rng.wrapping_mul(1664525).wrapping_add(1013904223);
-                let idx = (rng % pool_size as u64) as usize;
-                chosen.push(idx);
-            }
-        }
+            (0..count).map(|_| rand_below(&mut rng, pool_size)).collect()
+        };
         let res_ints: Vec<i64> = chosen.iter().map(|&idx| idx as i64).collect();
         K::int_list(res_ints)
     };
@@ -1231,21 +1249,12 @@ pub fn bin_search(x: &K, y: &K) -> Result<K, KonaError> {
     Ok(K::int(low))
 }
 
+/// x _in y: is x, as a whole, one of the items of y. C Kona's tests.c has 4 3 _in 1 7 2 4 6 3 -> 0 and
+/// "abc" _in ("abc";"def") is 1; the per-element form used to live here, but that is _lin's job.
 pub fn in_verb(x: &K, y: &K) -> Result<K, KonaError> {
     let y_atoms = to_vec_of_atoms(y)?;
-    if x.is_atom() {
-        let found = y_atoms.contains(x);
-        Ok(K::int(if found { 1 } else { 0 }))
-    } else {
-        let y_set: std::collections::HashSet<K> = y_atoms.into_iter().collect();
-        let x_atoms = to_vec_of_atoms(x)?;
-        let mut res = Vec::with_capacity(x_atoms.len());
-        for xe in x_atoms {
-            let found = y_set.contains(&xe);
-            res.push(K::int(if found { 1 } else { 0 }));
-        }
-        Ok(normalize_list(res))
-    }
+    let found = y_atoms.contains(x);
+    Ok(K::int(if found { 1 } else { 0 }))
 }
 
 pub fn val_verb(x: &K, ktree: &std::sync::Arc<crate::verbs::dict::KTree>) -> Result<K, KonaError> {
@@ -1571,6 +1580,10 @@ pub fn vs_or_vsx(x: &K, y: &K, is_extended: bool) -> Result<K, KonaError> {
         }
         (KData::IntList(bases), KData::IntAtom(val)) => {
             let xn = bases.len();
+            if xn == 0 {
+                // (!0) _vs 5 is !0 in C Kona; the 0..xn-1 loops below would underflow
+                return Ok(K::int_list(vec![]));
+            }
             for i in 0..xn {
                 if !is_extended && i == 0 && bases[0] == 0 {
                     continue;

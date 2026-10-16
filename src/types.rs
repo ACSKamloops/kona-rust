@@ -377,6 +377,10 @@ pub fn float_eq(x: f64, y: f64) -> bool {
 }
 
 pub fn compare_numeric(a: &KData, b: &KData) -> Option<std::cmp::Ordering> {
+    // two ints compare exactly, as in C Kona; only a float side goes through the tolerant fc
+    if let (KData::IntAtom(x), KData::IntAtom(y)) = (a, b) {
+        return Some(x.cmp(y));
+    }
     let val_a = match a {
         KData::IntAtom(i) => i2f(*i),
         KData::FloatAtom(f) => *f,
