@@ -8,7 +8,9 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-const MAX_C_SUITE_FAILURES: usize = 117;
+// 117 on 2026-10-15; 106 on 2026-10-16 after the semantic fixes (each-pair, -1#x, _in, bracket
+// chains, verb+lambda, flip, first, x!0, ...). Cases where both sides error are counted apart.
+const MAX_C_SUITE_FAILURES: usize = 106;
 
 fn parse_c_string(s: &str) -> Option<(String, usize)> {
     let mut chars = s.char_indices().peekable();
