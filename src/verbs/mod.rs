@@ -95,7 +95,7 @@ pub fn eval_verb(x: &K, ktree: &std::sync::Arc<crate::verbs::dict::KTree>) -> Re
         KData::CharList(v) => {
             let code = std::str::from_utf8(v).map_err(|_| KonaError::Type)?;
             if code.starts_with('\\') {
-                crate::handle_system_command(code, ktree);
+                crate::handle_system_command(code, ktree, &mut std::collections::HashMap::new());
                 return Ok(K::int(1));
             }
             let words = crate::parser::parse(code)?;

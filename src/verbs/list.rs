@@ -81,6 +81,9 @@ pub fn enlist(x: &K) -> Result<K, KonaError> {
 }
 
 pub fn count(x: &K) -> Result<K, KonaError> {
+    if x.is_function() {
+        return Ok(K::int(1)); // a function is an atom: #{x} is 1 in C Kona
+    }
     let len = x.len()?;
     Ok(K::int(len as i64))
 }
