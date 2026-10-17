@@ -139,6 +139,24 @@ const PAR_EACH_MIN: usize = 2048;
 /// separate KTree locks, so running it on several threads loses updates: `cnt:0; 0 {cnt+:y}/: !20000`
 /// came back ~108M instead of 199990000 on every multi-core run. _draw, 0: 1: and the doors stay off
 /// the threads too, so a fixed seed and printed output keep program order. (Made by Claude)
+/// Stack of an each-right/each-left worker thread (virtual; see par_apply)
+const WORKER_STACK: usize = 64 << 20;
+
+/// A scan that took no steps is its seed, not a one-item list: 0 +\ !0 is 0 in C Kona
+/// What each treats as one item: the typed atoms, and also functions and dictionaries (C Kona's
+/// `{x}' d` is d, `{x,y}'[d;1 2]` pairs the whole dictionary with 1 and with 2)
+fn each_atom(k: &K) -> bool {
+    k.is_atom() || k.is_function() || matches!(**k, crate::types::KData::Dictionary { .. })
+}
+
+fn scan_result(operand: &K, res: Vec<K>) -> K {
+    if res.len() == 1 {
+        res.into_iter().next().unwrap_or_else(K::nil)
+    } else {
+        normalize_scan_result(operand, res)
+    }
+}
+
 fn parallel_safe(operand: &K, fixed: &K) -> bool {
     if fixed.is_function() {
         return false;
@@ -316,6 +334,9 @@ fn eval_over(
         } else if let Some(n) = x_val.as_int() {
             if can_be_monadic(operand) {
                 let mut res = y_val.clone();
+                if n < 0 {
+                    return Err(KonaError::Int); // -3 f/ y and 0N f/ y are int errors in C Kona
+                }
                 for _ in 0..n {
                     res = crate::eval::apply_func(operand, &[res], env, ktree)?;
                 }
@@ -346,6 +367,10 @@ fn eval_over(
             if a.is_list() {
                 has_list = true;
                 let a_len = a.len()?;
+                if a_len == 0 {
+                    // any empty list means no steps: the seed comes back ({x+y+z}/[0;!0;1 2 3] is 0)
+                    return Ok(init.clone());
+                }
                 match len {
                     None => len = Some(a_len),
                     Some(l) if l != a_len => return Err(KonaError::Length),
@@ -354,6 +379,10 @@ fn eval_over(
             }
         }
         let len = len.unwrap_or(0);
+        if has_list && len == 0 {
+            // nothing to fold: the seed comes back as it is ({x+y+z}/[0;!0;1 2 3] is 0 in C Kona)
+            return Ok(init.clone());
+        }
         let count = if has_list { len } else { 1 };
         let mut y_vecs = Vec::with_capacity(y_args.len());
         for a in y_args {
@@ -539,6 +568,9 @@ fn eval_scan(
                 res.push(curr.clone());
             }
         } else {
+            if x.is_atom() {
+                return Ok(x.clone()); // +\ 5 is 5 in C Kona, not ,5
+            }
             let x_vec = to_vec_of_atoms(x)?;
             if x_vec.is_empty() {
                 Ok(normalize_scan_result(operand, vec![]))
@@ -551,7 +583,7 @@ fn eval_scan(
                     curr = crate::eval::apply_func(operand, &[curr, x_vec[i].clone()], env, ktree)?;
                     res.push(curr.clone());
                 }
-                Ok(normalize_scan_result(operand, res))
+                Ok(scan_result(operand, res))
             }
         }
     } else if args.len() == 2 {
@@ -573,10 +605,14 @@ fn eval_scan(
             if can_be_monadic(operand) {
                 let mut res = vec![y_val.clone()];
                 let mut curr = y_val.clone();
+                if n < 0 {
+                    return Err(KonaError::Int); // -3 f/ y and 0N f/ y are int errors in C Kona
+                }
                 for _ in 0..n {
                     curr = crate::eval::apply_func(operand, &[curr], env, ktree)?;
                     res.push(curr.clone());
                 }
+                // n f\ y with no steps is ,y in C Kona (tests.c: 0(+\)\1 1 is ,1 1), unlike a seeded scan
                 Ok(normalize_scan_result(operand, res))
             } else {
                 if y_val.is_atom() {
@@ -589,7 +625,7 @@ fn eval_scan(
                         curr = crate::eval::apply_func(operand, &[curr, ye], env, ktree)?;
                         res.push(curr.clone());
                     }
-                    Ok(normalize_scan_result(operand, res))
+                    Ok(scan_result(operand, res))
                 }
             }
         } else {
@@ -603,7 +639,7 @@ fn eval_scan(
                     curr = crate::eval::apply_func(operand, &[curr, ye], env, ktree)?;
                     res.push(curr.clone());
                 }
-                Ok(normalize_scan_result(operand, res))
+                Ok(scan_result(operand, res))
             }
         }
     } else {
@@ -616,6 +652,10 @@ fn eval_scan(
             if a.is_list() {
                 has_list = true;
                 let a_len = a.len()?;
+                if a_len == 0 {
+                    // any empty list means no steps: the seed comes back ({x+y+z}/[0;!0;1 2 3] is 0)
+                    return Ok(init.clone());
+                }
                 match len {
                     None => len = Some(a_len),
                     Some(l) if l != a_len => return Err(KonaError::Length),
@@ -624,6 +664,10 @@ fn eval_scan(
             }
         }
         let len = len.unwrap_or(0);
+        if has_list && len == 0 {
+            // nothing to fold: the seed comes back as it is ({x+y+z}/[0;!0;1 2 3] is 0 in C Kona)
+            return Ok(init.clone());
+        }
         let count = if has_list { len } else { 1 };
         let mut y_vecs = Vec::with_capacity(y_args.len());
         for a in y_args {
@@ -653,7 +697,7 @@ fn eval_scan(
                 acc = crate::eval::apply_func(operand, &step_args, env, ktree)?;
                 res.push(acc.clone());
             }
-            Ok(normalize_scan_result(operand, res))
+            Ok(scan_result(operand, res))
         }
     }
 }
@@ -669,11 +713,13 @@ fn eval_each(
     }
     if args.len() == 1 {
         let x = &args[0];
-        if left_bound_projection(operand).is_some() && x.is_atom() {
-            return crate::eval::apply_func(operand, &[x.clone()], env, ktree);
-        }
         if matches!(**x, crate::types::KData::Nil) {
             return Ok(K::nil());
+        }
+        // f' atom is f[atom] ({x+1}' 5 is 6 in C Kona; it used to come back as ,6). A function or a
+        // dictionary is an atom here too: {x}' d is d, and {x*10}' d is the type error d*10 would be
+        if each_atom(x) {
+            return crate::eval::apply_func(operand, &[x.clone()], env, ktree);
         }
         let x_vec = to_vec_of_atoms(x)?;
         let mut res = Vec::with_capacity(x_vec.len());
@@ -684,7 +730,7 @@ fn eval_each(
     } else {
         // Dyadic or N-ary each: f'[x; y; ...]
         // 1. Check if all arguments are atoms.
-        let all_atoms = args.iter().all(|a| a.is_atom());
+        let all_atoms = args.iter().all(each_atom);
         if all_atoms {
             return crate::eval::apply_func(operand, args, env, ktree);
         }
@@ -693,8 +739,11 @@ fn eval_each(
         // length at 0, so a later 1 2 3 passed the check and the loop below indexed into the empty vec
         let mut len: Option<usize> = None;
         for a in args {
-            if a.is_list() {
+            if !each_atom(a) {
                 let a_len = to_vec_of_atoms(a)?.len();
+                if a_len == 0 {
+                    return Ok(K::general_list(vec![])); // {x,y,z}'[1 2;!0;3] is () in C Kona
+                }
                 match len {
                     None => len = Some(a_len),
                     Some(l) if l != a_len => return Err(KonaError::Length),
@@ -703,16 +752,20 @@ fn eval_each(
             }
         }
         let len = len.unwrap_or(0);
+        if len == 0 {
+            return Ok(K::general_list(vec![])); // {x,y}'[1 2;!0] is () in C Kona, not a length error
+        }
         // 3. Collect elements and apply.
         let mut args_vecs = Vec::with_capacity(args.len());
         for a in args {
-            args_vecs.push(to_vec_of_atoms(a)?);
+            // an atom-like argument (including a function or dictionary) is used whole at every step
+            args_vecs.push(if each_atom(a) { Vec::new() } else { to_vec_of_atoms(a)? });
         }
         let mut res = Vec::with_capacity(len);
         for i in 0..len {
             let mut slice = Vec::with_capacity(args.len());
             for j in 0..args.len() {
-                if args[j].is_list() {
+                if !each_atom(&args[j]) {
                     slice.push(args_vecs[j][i].clone());
                 } else {
                     slice.push(args[j].clone());
@@ -742,12 +795,21 @@ where
             .chunks(chunk)
             .map(|c| {
                 let job = &job;
-                s.spawn(move || c.iter().cloned().map(job).collect::<Result<Vec<K>, KonaError>>())
+                // the default 2 MB worker stack overflowed on a deeply nested fixed argument that the
+                // serial path handles; the reservation is virtual, so a deep one costs nothing unused
+                std::thread::Builder::new().stack_size(WORKER_STACK).spawn_scoped(s, move || {
+                    c.iter().cloned().map(job).collect::<Result<Vec<K>, KonaError>>()
+                })
             })
             .collect();
         handles
             .into_iter()
-            .map(|h| h.join().unwrap_or_else(|_| Err(KonaError::System("Thread panicked".to_string()))))
+            .map(|h| match h {
+                Ok(h) => h
+                    .join()
+                    .unwrap_or_else(|_| Err(KonaError::System("Thread panicked".to_string()))),
+                Err(e) => Err(KonaError::System(format!("could not start a worker thread: {e}"))),
+            })
             .collect()
     });
     let mut out = Vec::with_capacity(items.len());
@@ -840,7 +902,7 @@ fn eval_each_pair(
     // i>0, so one item fewer than y; an atom gives f[y;y]; a one-item list gives (). With a left
     // argument, x f': y puts x itself in front of those pairs (10 -': 2 3 7 is 10 1 4) and x f': atom
     // is just x. The old code returned y[0] / f[y[0];x] first, which is k4's prior. (Made by Claude)
-    if rhs.is_atom() {
+    if rhs.is_atom() || matches!(**rhs, crate::types::KData::Nil) {
         return match lhs {
             Some(left) => Ok(left.clone()),
             None => crate::eval::apply_func(operand, &[rhs.clone(), rhs.clone()], env, ktree),
