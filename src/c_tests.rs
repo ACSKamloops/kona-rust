@@ -10,7 +10,10 @@ use std::sync::Arc;
 
 // 117 on 2026-10-15; 106 on 2026-10-16 after the semantic fixes (each-pair, -1#x, _in, bracket
 // chains, verb+lambda, flip, first, x!0, ...). Cases where both sides error are counted apart.
-const MAX_C_SUITE_FAILURES: usize = 107;
+const MAX_C_SUITE_FAILURES: usize = 95;
+// Passes must not drop either: a change that makes both sides of many cases error would lower
+// `failed` while moving cases into both_errored, and the ratchet above would not notice.
+const MIN_C_SUITE_PASSED: usize = 1065;
 
 fn parse_c_string(s: &str) -> Option<(String, usize)> {
     let mut chars = s.char_indices().peekable();
@@ -431,6 +434,13 @@ fn test_c_suite_comparison() {
     println!("  Failed:  {}", failed);
     println!("  Both sides errored (not counted as pass): {}", both_errored);
     println!("  Skipped: {}", skipped);
+
+    if passed < MIN_C_SUITE_PASSED {
+        panic!(
+            "C suite comparison regressed: {} passes is below the floor of {}",
+            passed, MIN_C_SUITE_PASSED
+        );
+    }
 
     if failed > 0 {
         println!("\n--- Failed Cases ---");

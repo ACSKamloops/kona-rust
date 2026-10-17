@@ -86,11 +86,17 @@ pub fn resolve_script_path(name: &str) -> String {
 thread_local! {
     static LOAD_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
+
+/// What `\\` in a script does. True (kona.exe): exit, as C Kona does whether the script came from
+/// the command line or from \l. A program embedding the library (ue/) sets it false in its
+/// session setup, so a script written for C Kona ends quietly instead of closing the host.
+pub static EXIT_ON_SCRIPT_END: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// Nested \l loads before it is an error (C Kona stops at 124); a.k loading a.k overflowed the stack
 const MAX_LOAD_DEPTH: usize = 124;
 
-/// Does this line's result stay unprinted at the prompt? C Kona shows nothing for an assignment
-/// (a:1 2 3, a::x, a+:1, a[0]:9); the last statement on the line decides. (Made by Claude)
+/// Does this line's result stay unprinted at the prompt? C Kona shows nothing for a plain
+/// assignment (a:1 2 3, a::x, a[0]:9) but does print the result of a modifying one (a+:1 prints
+/// 2 3 4); the last statement on the line decides. (Made by Claude)
 pub fn is_assignment_statement(words: &[crate::parser::Word]) -> bool {
     use crate::parser::Word;
     let start = words
@@ -98,7 +104,7 @@ pub fn is_assignment_statement(words: &[crate::parser::Word]) -> bool {
         .rposition(|w| matches!(w, Word::Verb(v) if v == ";"))
         .map(|i| i + 1)
         .unwrap_or(0);
-    let assigns = |w: &Word| matches!(w, Word::Verb(v) if v.ends_with(':'));
+    let assigns = |w: &Word| matches!(w, Word::Verb(v) if v == ":");
     match &words[start..] {
         [Word::LocalAssign(_) | Word::GlobalAssign(_), ..] => true,
         [Word::Name(_), v, ..] if assigns(v) => true,
@@ -143,9 +149,12 @@ fn run_script_lines(content: &str, ktree: &Arc<KTree>) -> Result<(), KonaError> 
         }
 
         if brace_depth == 0 && trimmed.starts_with('\\') {
-            // \\ ends the script, not the process: a C Kona script ends with \\ to leave the prompt
-            // it drops into after loading, and a library host (the Unreal bridge) has to survive it
+            // \\ in a script exits, as in C Kona (its scripts end with \\ to leave the prompt they
+            // drop into); an embedding host turns that into "end this script" via EXIT_ON_SCRIPT_END
             if trimmed == "\\\\" {
+                if EXIT_ON_SCRIPT_END.load(std::sync::atomic::Ordering::Relaxed) {
+                    std::process::exit(0);
+                }
                 return Ok(());
             }
             handle_system_command(trimmed, ktree, &mut env);

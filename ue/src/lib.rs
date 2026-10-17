@@ -20,6 +20,9 @@ pub struct Session {
 
 impl Session {
     fn new() -> Self {
+        // a `\\` line in a loaded script ends that script here; in kona.exe it exits the process as in
+        // C Kona, which inside the Unreal editor meant the editor closing
+        kona::EXIT_ON_SCRIPT_END.store(false, std::sync::atomic::Ordering::Relaxed);
         Session { tree: Arc::new(KTree::new()), env: HashMap::new(), last: K::nil(), err: String::new() }
     }
 

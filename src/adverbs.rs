@@ -149,6 +149,15 @@ fn each_atom(k: &K) -> bool {
     k.is_atom() || k.is_function() || matches!(**k, crate::types::KData::Dictionary { .. })
 }
 
+/// x f/ y with a function x is the while loop (cond f/ y) only when f is a monadic lambda,
+/// projection or derived verb; with a dyadic primitive the function is the seed, as in C Kona
+/// where f @/ 1 2 is (f@1)@2
+fn while_form(x: &K, operand: &K) -> bool {
+    x.is_function()
+        && !matches!(&**operand, crate::types::KData::Function(crate::types::KFunc::Primitive(_)))
+        && can_be_monadic(operand)
+}
+
 fn scan_result(operand: &K, res: Vec<K>) -> K {
     if res.len() == 1 {
         res.into_iter().next().unwrap_or_else(K::nil)
@@ -322,7 +331,7 @@ fn eval_over(
                 return crate::verbs::list::enlist(x_val);
             }
         }
-        if matches!(**x_val, crate::types::KData::Function(_)) {
+        if while_form(x_val, operand) {
             let mut curr = y_val.clone();
             loop {
                 let cond_val = crate::eval::apply_func(x_val, &[curr.clone()], env, ktree)?;
@@ -590,7 +599,7 @@ fn eval_scan(
         // Dyadic scan: x f\ y
         let x_val = &args[0];
         let y_val = &args[1];
-        if matches!(**x_val, crate::types::KData::Function(_)) {
+        if while_form(x_val, operand) {
             let mut curr = y_val.clone();
             let mut res = vec![curr.clone()];
             loop {

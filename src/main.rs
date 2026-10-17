@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 // main.rs - kona.exe: the REPL and the command line. Everything else lives in the library (lib.rs).
 
-use kona::{handle_system_command, is_assignment_statement, load_and_run_script};
+use kona::{handle_system_command, is_assignment_statement, load_and_run_script, resolve_script_path};
 use kona::types::K;
 use kona::verbs::dict::KTree;
 use std::collections::HashMap;
@@ -170,8 +170,10 @@ fn main() {
         std::process::exit(if ok { 0 } else { 1 });
     }
 
-    for path in &script_paths {
-        if let Err(e) = load_and_run_script(path, &ktree) {
+    for name in &script_paths {
+        // the same f / f.k lookup as \l (C Kona: `k onlyk` loads onlyk.k)
+        let path = resolve_script_path(name);
+        if let Err(e) = load_and_run_script(&path, &ktree) {
             eprintln!("Error executing script {}: {:?}", path, e);
             std::process::exit(1);
         }

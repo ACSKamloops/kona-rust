@@ -12,9 +12,10 @@ use std::sync::Arc;
 pub static PRINT_PRECISION: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(7);
 
 /// A client that sends part of a request and stops used to hold a thread (and its pre-allocated
-/// body) forever. The IPC limit is generous because a game client keeps one connection open.
+/// body) forever. HTTP requests are short-lived; an IPC client (the game) keeps one connection
+/// open and may be idle for any length of time, so IPC only times out in the middle of a message.
 const HTTP_READ_TIMEOUT_SECS: u64 = 30;
-const IPC_READ_TIMEOUT_SECS: u64 = 600;
+const IPC_MESSAGE_TIMEOUT_SECS: u64 = 30;
 /// Connection threads run user K handlers (.m.g .m.s .m.h), so they get the same deep stack as the
 /// main interpreter thread rather than the 2 MB default; the reservation is virtual.
 const CONNECTION_STACK: usize = 256 << 20;
@@ -93,15 +94,34 @@ pub fn fmt_int(i: i64) -> String {
     }
 }
 
+/// A K string the way C Kona prints it: quotes and backslashes escaped, \n \t \r for those
+/// controls, \ooo (octal) for every other control or non-ASCII byte. Before this, "a\"b" printed
+/// as "a"b", a newline printed raw, and a non-UTF-8 string printed as char_list(len=N).
+fn k_string(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() + 2);
+    out.push('"');
+    for &b in bytes {
+        match b {
+            b'"' => out.push_str("\\\""),
+            b'\\' => out.push_str("\\\\"),
+            b'\n' => out.push_str("\\n"),
+            b'\t' => out.push_str("\\t"),
+            b'\r' => out.push_str("\\r"),
+            0x20..=0x7e => out.push(b as char),
+            _ => out.push_str(&format!("\\{:03o}", b)),
+        }
+    }
+    out.push('"');
+    out
+}
+
 pub fn format_k(k: &K) -> String {
     match &**k {
         KData::HashList { .. } => ".(..)".to_string(),
         KData::Nil => "".to_string(),
         KData::IntAtom(i) => fmt_int(*i),
         KData::FloatAtom(f) => fmt_float(*f, true),
-        KData::CharAtom(c) => {
-            format!("\"{}\"", c)
-        }
+        KData::CharAtom(c) => k_string(&[*c as u32 as u8]),
         KData::SymbolAtom(s) => {
             format!("`{}", s)
         }
@@ -140,23 +160,24 @@ pub fn format_k(k: &K) -> String {
         }
         // a one-item list prints with a leading comma, as C Kona does, so ,"c" ,`a and ,1 2 3 are
         // told apart from the atom "c", the atom `a and the list 1 2 3 (they used to print the same)
-        KData::CharList(v) => match std::str::from_utf8(v) {
-            Ok(s) if v.len() == 1 => format!(",\"{}\"", s),
-            Ok(s) => format!("\"{}\"", s),
-            Err(_) => {
-                format!("char_list(len={})", v.len())
+        KData::CharList(v) => {
+            if v.len() == 1 {
+                format!(",{}", k_string(v))
+            } else {
+                k_string(v)
             }
-        },
+        }
         KData::SymbolList(v) => {
             if v.is_empty() {
                 "0#`".to_string()
             } else if v.len() == 1 {
                 format!(",`{}", v[0])
             } else {
+                // `a `b `c with spaces, the K3 spelling C Kona prints
                 v.iter()
                     .map(|s| format!("`{}", s))
                     .collect::<Vec<String>>()
-                    .join("")
+                    .join(" ")
             }
         }
         KData::GeneralList(v) => {
@@ -461,8 +482,9 @@ pub struct KDeserializer<'a> {
 
 /// Nesting allowed in a binary value (1: files and -i messages): a general list inside a general list
 /// costs 6 bytes per level, so without a cap a 6 MB message recursed a million deep and overflowed the
-/// thread's stack. 64 levels is what kwire.rs allows for the C format too.
-const MAX_BINARY_DEPTH: usize = 64;
+/// thread's stack. 4096 levels read back anything this port writes in practice (a first cap of 64
+/// refused files it had written itself) and cost well under 1 MB of stack.
+const MAX_BINARY_DEPTH: usize = 10_000;
 
 impl<'a> KDeserializer<'a> {
     pub fn new(data: &'a [u8]) -> Self {
@@ -743,7 +765,11 @@ pub fn handle_http_connection(mut stream: TcpStream, ktree: Arc<KTree>) -> Resul
             break;
         }
         head.extend_from_slice(&buffer[..bytes_read]);
-        if head.windows(4).any(|w| w == b"\r\n\r\n") || head.len() >= HTTP_MAX_HEAD {
+        // a bare LF LF ends the head too (curl and many test clients send that)
+        if head.windows(4).any(|w| w == b"\r\n\r\n")
+            || head.windows(2).any(|w| w == b"\n\n")
+            || head.len() >= HTTP_MAX_HEAD
+        {
             break;
         }
     }
@@ -831,13 +857,16 @@ pub fn start_http_server(port: u16, ktree: Arc<KTree>) {
         let ktree_clone = ktree.clone();
         // an idle or half-sent request no longer pins a thread forever
         let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(HTTP_READ_TIMEOUT_SECS)));
-        let _ = std::thread::Builder::new()
+        let spawned = std::thread::Builder::new()
             .stack_size(CONNECTION_STACK)
             .spawn(move || {
-            if let Err(e) = handle_http_connection(stream, ktree_clone) {
-                eprintln!("Error handling HTTP connection: {:?}", e);
-            }
-        });
+                if let Err(e) = handle_http_connection(stream, ktree_clone) {
+                    eprintln!("Error handling HTTP connection: {:?}", e);
+                }
+            });
+        if let Err(e) = spawned {
+            eprintln!("Could not start an HTTP connection thread: {}", e);
+        }
     }
 }
 
@@ -940,10 +969,16 @@ fn handle_c_message(stream: &mut TcpStream, first5: [u8; 5], ktree: &Arc<KTree>)
 pub fn handle_ipc_connection(mut stream: TcpStream, ktree: Arc<KTree>) -> Result<(), KonaError> {
     let _ = stream.set_nodelay(true);
     loop {
+        // idle between messages for as long as the client likes (C Kona never drops a connection);
+        // once a header has started, the rest of the message has IPC_MESSAGE_TIMEOUT_SECS to arrive
+        let _ = stream.set_read_timeout(None);
         let mut first5 = [0u8; 5];
         if stream.read_exact(&mut first5).is_err() {
             return Ok(());
         }
+        let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(
+            IPC_MESSAGE_TIMEOUT_SECS,
+        )));
         if crate::kwire::is_c_header(&first5) {
             handle_c_message(&mut stream, first5, &ktree)?;
             continue;
@@ -1011,14 +1046,17 @@ pub fn start_ipc_server(port: u16, ktree: Arc<KTree>) {
             }
         };
         let ktree_clone = ktree.clone();
-        let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(IPC_READ_TIMEOUT_SECS)));
-        let _ = std::thread::Builder::new()
+        let spawned = std::thread::Builder::new()
             .stack_size(CONNECTION_STACK)
             .spawn(move || {
-            if let Err(e) = handle_ipc_connection(stream, ktree_clone) {
-                eprintln!("Error handling IPC connection: {:?}", e);
-            }
-        });
+                if let Err(e) = handle_ipc_connection(stream, ktree_clone) {
+                    eprintln!("Error handling IPC connection: {:?}", e);
+                }
+            });
+        if let Err(e) = spawned {
+            // out of threads or address space: say so instead of silently dropping the client
+            eprintln!("Could not start an IPC connection thread: {}", e);
+        }
     }
 }
 
