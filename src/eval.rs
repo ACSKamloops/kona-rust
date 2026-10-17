@@ -15,11 +15,12 @@ thread_local! {
 }
 
 /// Nested evaluations (eval_words_flow and apply_func frames together) before a limit error. A
-/// recursive K function costs about three per level, so this is ~3300 levels; C Kona manages 400
-/// and stack-errors at 2000. Measured to fit an 8 MB stack with room to spare (the Linux/macOS
-/// main thread; build.rs reserves the same for the Windows exe). A host embedding the library
-/// (ue/) must give its calling thread that much, or lower this.
-const MAX_DEPTH: usize = 10_000;
+/// plain recursive K function costs about three per level; the heavier paths (recursion through
+/// @ . / brackets, traps, amends, parentheses) use more native stack per unit, and the review
+/// found 10 000 units overflowing an 8 MB stack through them. 4 000 is ~1300 plain levels (C Kona
+/// manages 400 and stack-errors at 2000) and fits 8 MB on every shape tried. build.rs reserves
+/// that for the Windows exe; a host embedding the library (ue/) must give its thread as much.
+const MAX_DEPTH: usize = 4_000;
 
 struct DepthGuard;
 impl DepthGuard {
@@ -776,81 +777,37 @@ fn eval_rightmost_flow<'a>(
                         }
                     }
 
-                    let mut is_trap = false;
-                    let mut func_to_trap = K::nil();
-                    let mut target_val = K::nil();
-                    // Telling the trap .[f;x;:] from the amend @[x;i;f] needs exprs[0] and exprs[2]
-                    // evaluated; those values are kept and reused below, so a side effect in either
-                    // slot (c+:1, 0:, _draw) runs once. They used to be evaluated a second time.
-                    let mut pre_a: Option<K> = None;
-                    let mut pre_f: Option<K> = None;
-
-                    if exprs.len() == 3 {
-                        let f_val = match eval_words_flow(&exprs[0], env, ktree)? {
+                    // K evaluates the bracket's arguments right to left, each once (tests.c: with
+                    // c+:1 / c*:10 / c+:100 in the three slots c ends at 1001)
+                    let mut slots: Vec<K> = Vec::with_capacity(exprs.len());
+                    for idx in (0..exprs.len()).rev() {
+                        slots.push(match eval_words_flow(&exprs[idx], env, ktree)? {
                             EvalFlow::Value(k) => k,
                             ret @ EvalFlow::Return(_) => return Ok((ret, &words[..len - 2])),
-                        };
-                        let e_val = match eval_words_flow(&exprs[2], env, ktree)? {
-                            EvalFlow::Value(k) => k,
-                            ret @ EvalFlow::Return(_) => return Ok((ret, &words[..len - 2])),
-                        };
-                        if is_colon_function(&e_val) || matches!(&*f_val, KData::Function(_)) {
-                            is_trap = true;
-                            func_to_trap = f_val;
-                        } else {
-                            pre_a = Some(f_val);
-                        }
-                        pre_f = Some(e_val);
+                        });
                     }
+                    slots.reverse();
+                    let v_val = if exprs.len() == 4 { slots.pop() } else { None };
+                    let f_val = slots.pop().unwrap_or_else(K::nil);
+                    let i_val = slots.pop().unwrap_or_else(K::nil);
+                    let a_val = slots.pop().unwrap_or_else(K::nil);
 
-                    if !is_trap {
-                        if is_var {
-                            target_val = lookup_var(&var_name, env, ktree)?;
-                        } else {
-                            let a_val = match pre_a.take() {
-                                Some(v) => v,
-                                None => match eval_words_flow(&exprs[0], env, ktree)? {
-                                    EvalFlow::Value(k) => k,
-                                    ret @ EvalFlow::Return(_) => {
-                                        return Ok((ret, &words[..len - 2]));
-                                    }
-                                },
-                            };
-                            if let KData::SymbolAtom(s) = &*a_val {
-                                write_back = true;
-                                var_name = s.to_string();
-                                target_val = lookup_var(&var_name, env, ktree)?;
-                            } else {
-                                target_val = a_val;
-                            }
-                        }
-                    }
-
-                    if is_trap {
-                        let e_val = pre_f.take().unwrap_or_else(K::nil);
-                        let res_val =
-                            apply_trap(&func_to_trap, &exprs[1], e_val, is_deep, env, ktree)?;
+                    // three arguments: .[f;x;:] / .[f;x;g] is a trap when f is a function or the
+                    // third is :, otherwise @[x;i;f] amends with a monadic f
+                    if exprs.len() == 3 && (is_colon_function(&f_val) || a_val.is_function()) {
+                        let res_val = apply_trap(&a_val, i_val, f_val, is_deep, env, ktree)?;
                         return Ok((EvalFlow::Value(res_val), &words[..len - 2]));
                     }
 
-                    let i_val = match eval_words_flow(&exprs[1], env, ktree)? {
-                        EvalFlow::Value(k) => k,
-                        ret @ EvalFlow::Return(_) => return Ok((ret, &words[..len - 2])),
-                    };
-                    let f_val = match pre_f.take() {
-                        Some(v) => v,
-                        None => match eval_words_flow(&exprs[2], env, ktree)? {
-                            EvalFlow::Value(k) => k,
-                            ret @ EvalFlow::Return(_) => return Ok((ret, &words[..len - 2])),
-                        },
-                    };
-                    let v_val = if exprs.len() == 4 {
-                        Some(match eval_words_flow(&exprs[3], env, ktree)? {
-                            EvalFlow::Value(k) => k,
-                            ret @ EvalFlow::Return(_) => return Ok((ret, &words[..len - 2])),
-                        })
+                    let target_val = if is_var {
+                        a_val
+                    } else if let KData::SymbolAtom(s) = &*a_val {
+                        // `v names the K-tree variable: read and written there whatever the scope
+                        write_back = true;
+                        var_name = s.to_string();
+                        lookup_var(&var_name, &HashMap::new(), ktree)?
                     } else {
-                        None
+                        a_val
                     };
 
                     let res_val = if is_deep {
@@ -870,8 +827,10 @@ fn eval_rightmost_flow<'a>(
                     if write_back {
                         // `v names the K-tree variable, so the write goes to the global even inside a
                         // function (force_global=false made a local shadow and the global never changed)
-                        assign_var(var_name.clone(), res_val.clone(), env, ktree, true)?;
-                        return Ok((EvalFlow::Value(res_val), &words[..len - 2]));
+                        // an empty env so a local of the same name is never the target, and the
+                        // result is the symbol, as in K3 (@[`a;0;-:] prints `a; a has changed)
+                        assign_var(var_name.clone(), res_val, &mut HashMap::new(), ktree, true)?;
+                        return Ok((EvalFlow::Value(K::symbol(var_name)), &words[..len - 2]));
                     } else {
                         return Ok((EvalFlow::Value(res_val), &words[..len - 2]));
                     }
@@ -1379,14 +1338,20 @@ fn eval_words_flow(
                 };
 
                 if let Some(acc) = accum {
+                    // a derived verb (f/ f\ f' ...) takes whatever is to its left as its left
+                    // argument, a function-valued name included: f @/ 1 2 is (f@1)@2 (C Kona: 3)
+                    let derived_verb = matches!(remaining.last(), Some(Word::Adverb(_)));
                     let is_left_noun = if !next_remaining.is_empty() {
                         let left_word = &next_remaining[next_remaining.len() - 1];
                         match left_word {
                             // a name holding a function is not a left argument: f g 3 is f[g[3]]
                             // (C Kona: 7), only a name holding data makes `a g 3` infix
-                            Word::Name(n) => !lookup_var(n, env, ktree)
-                                .map(|v| v.is_function())
-                                .unwrap_or(false),
+                            Word::Name(n) => {
+                                derived_verb
+                                    || !lookup_var(n, env, ktree)
+                                        .map(|v| v.is_function())
+                                        .unwrap_or(false)
+                            }
                             Word::Noun(_) | Word::Paren(_) | Word::Bracket(_) | Word::Brace { .. } => {
                                 true
                             }
@@ -1409,7 +1374,9 @@ fn eval_words_flow(
                     } else {
                         let is_acc_func = acc.is_composable_func();
                         let is_val_func = val.is_composable_func();
-                        let res = if is_acc_func && is_val_func {
+                        // two lambdas side by side apply, they do not compose: f h 3 with both
+                        // lambdas is f[h[3]] (or a type error, as C Kona gives when h projects)
+                        let res = if is_acc_func && is_val_func && !is_lambda(&val) {
                             K::function(KFunc::composition(val.clone(), acc.clone()))
                         } else {
                             apply_func(&val, &[acc], env, ktree)?
@@ -1481,6 +1448,9 @@ pub fn apply_func(
                     && !is_colon_function(&args[2]);
                 if (name == "@" || name == ".") && (args.len() == 4 || three_arg_amend) {
                     apply_amend_primitive(name, args, env, ktree)
+                } else if (name == "@" || name == ".") && args.len() == 3 {
+                    // the trap reached as a value: .[.;(f;x;:)] and g:.; g[f;x;:] (C Kona: 0 2)
+                    apply_trap(&args[0], args[1].clone(), args[2].clone(), name == ".", env, ktree)
                 } else if name == "_ssr" && args.len() == 3 {
                     crate::verbs::ssr_verb_triadic(&args[0], &args[1], &args[2])
                 } else if args.len() == 1 {
@@ -1793,7 +1763,8 @@ fn apply_amend_primitive(
     let mut var_name = String::new();
     let target = if let KData::SymbolAtom(sym) = &*args[0] {
         let key = sym.to_string();
-        if let Some(val) = resolve_dotted_name(&key, env, ktree) {
+        // the K-tree variable, never a local of the same name (C Kona: `a is the global a)
+        if let Some(val) = resolve_dotted_name(&key, &HashMap::new(), ktree) {
             is_var = true;
             var_name = key;
             val
@@ -1812,10 +1783,12 @@ fn apply_amend_primitive(
         apply_amend(&target, &args[1], &args[2], args.get(3), env, ktree)?
     };
 
-    // a symbol names the K-tree variable, so the result goes back there from any scope
+    // a symbol names the K-tree variable, so the result goes back there from any scope, and the
+    // call returns the symbol as K3 does
     if is_var {
         let mut dummy = HashMap::new();
-        assign_var(var_name, result.clone(), &mut dummy, ktree, true)?;
+        assign_var(var_name, result, &mut dummy, ktree, true)?;
+        return Ok(args[0].clone());
     }
 
     Ok(result)
@@ -2090,15 +2063,17 @@ fn is_colon_function(k: &K) -> bool {
 /// 3-argument amend, and evaluating it again here ran its side effects twice
 fn apply_trap(
     f: &K,
-    x_expr: &[Word],
+    x_val: K,
     e_val: K,
     is_deep: bool,
-    env: &mut HashMap<String, K>,
+    env: &HashMap<String, K>,
     ktree: &Arc<KTree>,
 ) -> Result<K, KonaError> {
     let is_colon = is_colon_function(&e_val);
 
-    let x_res = eval_words(x_expr, env, ktree);
+    // the arguments are already evaluated (right to left, like any bracket); the trap covers the
+    // application of f, as in C Kona
+    let x_res: Result<K, KonaError> = Ok(x_val);
 
     let res = match x_res {
         Ok(x_val) => {
@@ -2141,7 +2116,12 @@ fn apply_trap(
 /// A brace function {..}: a noun to the verbs (@{x+y} applies @), unlike a primitive or an
 /// adverb-derived verb, which compose
 fn is_lambda(k: &K) -> bool {
-    matches!(&**k, KData::Function(KFunc::UserDefined { .. }))
+    match &**k {
+        KData::Function(KFunc::UserDefined { .. }) => true,
+        // a projection of a lambda is still a noun to the verbs (@{x+y}[1] is 1 in C Kona)
+        KData::Function(KFunc::Projection { func, .. }) => is_lambda(func),
+        _ => false,
+    }
 }
 
 fn error_to_k(err: KonaError) -> K {

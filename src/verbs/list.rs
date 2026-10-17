@@ -801,25 +801,14 @@ pub fn find(a: &K, b: &K) -> Result<K, KonaError> {
         }
     }
 
+    // x ? y looks y up as one item of x, whatever y is (C Kona: 1 2 3 ? 2 3 is 3, (1 2;3 4) ? 1 2 is
+    // 0); it used to look up each atom of a list y. The (x;_hash x) form above is the port's own
+    // many-keys lookup and keeps mapping over y.
     let a_vec = to_vec_of_atoms(a)?;
-    if b.is_atom() {
-        if let Some(pos) = a_vec.iter().position(|x| numeric_tolerant_eq(x, b)) {
-            Ok(K::int(pos as i64))
-        } else {
-            Ok(K::int(a_vec.len() as i64))
-        }
-    } else {
-        let b_vec = to_vec_of_atoms(b)?;
-        let mut res = Vec::with_capacity(b_vec.len());
-        for be in b_vec {
-            if let Some(pos) = a_vec.iter().position(|x| numeric_tolerant_eq(x, &be)) {
-                res.push(K::int(pos as i64));
-            } else {
-                res.push(K::int(a_vec.len() as i64));
-            }
-        }
-        Ok(normalize_list(res))
-    }
+    let pos = a_vec
+        .iter()
+        .position(|x| numeric_tolerant_eq(x, b) || crate::types::match_eq(x, b));
+    Ok(K::int(pos.unwrap_or(a_vec.len()) as i64))
 }
 
 pub fn at_deep(x: &K, args: &[K]) -> Result<K, KonaError> {
