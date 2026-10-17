@@ -43,9 +43,9 @@ pub fn to_vec_of_atoms(k: &K) -> Result<Vec<K>, KonaError> {
         KData::SymbolList(v) => Ok(v.iter().map(|x| K::symbol(x.clone())).collect()),
         KData::GeneralList(v) => Ok(v.clone()),
         KData::HashList { indices, .. } => Ok(indices.iter().map(|&x| K::int(x)).collect()),
-        KData::Dictionary { .. } => Err(KonaError::Type),
-        KData::Nil => Ok(vec![k.clone()]),
-        KData::Function(_) => Err(KonaError::Type),
+        // a dictionary or a function is one item to the list verbs, as in C Kona: #d is 1, *d is d,
+        // 2#{x} is ({x};{x}), 1,{x} is (1;{x})
+        KData::Dictionary { .. } | KData::Nil | KData::Function(_) => Ok(vec![k.clone()]),
     }
 }
 
@@ -259,10 +259,10 @@ pub(crate) fn k_mod_int(x: i64, y: i64) -> Result<i64, KonaError> {
 }
 
 pub(crate) fn k_mod_float(x: f64, y: f64) -> Result<f64, KonaError> {
-    if y == 0.0 {
-        return Ok(x);
-    }
-    Ok(x - y * (x / y).floor())
+    // C Kona's FMOD: h = g ? f-g*floor(f/g) : f, then h if |h|>0 else 0 - so a nan or an infinity
+    // anywhere comes out as 0.0 (0n!2, 5!0n, 0i!2 are all 0.0 there)
+    let h = if y == 0.0 { x } else { x - y * (x / y).floor() };
+    Ok(if h.abs() > 0.0 { h } else { 0.0 })
 }
 
 pub(crate) fn checked_add_k(x: i64, y: i64) -> i64 {
@@ -745,6 +745,9 @@ pub fn sqrt_verb(x: &K) -> Result<K, KonaError> {
 }
 
 static PRNG_SEED: std::sync::Mutex<u64> = std::sync::Mutex::new(1337);
+/// False until \r sets a seed or the first draw seeds from the clock. It used to be "the state is
+/// still 1337", so \r 1337 could never fix a sequence.
+static PRNG_SEEDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn get_prng_seed() -> u64 {
     *PRNG_SEED.lock().unwrap()
@@ -752,6 +755,7 @@ pub fn get_prng_seed() -> u64 {
 
 pub fn set_prng_seed(seed: u64) {
     *PRNG_SEED.lock().unwrap() = seed;
+    PRNG_SEEDED.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// One step of the generator. The state advances as a 64-bit LCG (so a \r seed still fixes the sequence)
@@ -819,12 +823,13 @@ pub fn draw_verb(a: &K, b: &K) -> Result<K, KonaError> {
         .map_err(|_| KonaError::System("PRNG lock failed".to_string()))?;
     let mut rng = *seed_guard;
 
-    if rng == 1337 {
+    if !PRNG_SEEDED.load(std::sync::atomic::Ordering::Relaxed) {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(1337);
         rng ^= now;
+        PRNG_SEEDED.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     let result = if b.is_list() {
@@ -888,10 +893,11 @@ pub fn format_verb(x: &K) -> Result<K, KonaError> {
         // the same %.{p}g text the prompt shows: $ 0.1+0.2 is "0.3" in C Kona, not "0.30000000000000004"
         KData::FloatAtom(f) => {
             let p = crate::io::PRINT_PRECISION.load(std::sync::atomic::Ordering::Relaxed);
+            // $ gives C's own spellings here ($0n is "nan", $0i is "inf"), unlike the prompt's 0n 0i
             let s = if f.is_nan() {
-                "0n".to_string()
+                "nan".to_string()
             } else if f.is_infinite() {
-                if f.is_sign_positive() { "0i" } else { "-0i" }.to_string()
+                if f.is_sign_positive() { "inf" } else { "-inf" }.to_string()
             } else {
                 crate::io::fmt_g(*f, p)
             };
@@ -1263,9 +1269,11 @@ pub fn bin_search(x: &K, y: &K) -> Result<K, KonaError> {
 /// x _in y: is x, as a whole, one of the items of y. C Kona's tests.c has 4 3 _in 1 7 2 4 6 3 -> 0 and
 /// "abc" _in ("abc";"def") is 1; the per-element form used to live here, but that is _lin's job.
 pub fn in_verb(x: &K, y: &K) -> Result<K, KonaError> {
-    let y_atoms = to_vec_of_atoms(y)?;
-    let found = y_atoms.contains(x);
-    Ok(K::int(if found { 1 } else { 0 }))
+    // the same tolerant lookup as find (?), so 1 _in 1.0 2 and 0N _in 0n 1 are 1 as in C Kona
+    let hay = if y.is_list() { y.clone() } else { crate::verbs::list::enlist(y)? };
+    let idx = crate::verbs::list::find(&hay, x)?.as_int().unwrap_or(i64::MAX);
+    let n = hay.len()? as i64;
+    Ok(K::int(if idx < n { 1 } else { 0 }))
 }
 
 pub fn val_verb(x: &K, ktree: &std::sync::Arc<crate::verbs::dict::KTree>) -> Result<K, KonaError> {

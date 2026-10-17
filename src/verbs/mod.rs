@@ -142,6 +142,25 @@ pub fn eval_verb(x: &K, ktree: &std::sync::Arc<crate::verbs::dict::KTree>) -> Re
     }
 }
 
+/// n $ text as C Kona formats it: right-justified in n columns for n>0, left-justified for n<0,
+/// all stars when the text does not fit (3 $ "hello" is "***")
+fn pad_text(n: i64, text: &[u8]) -> K {
+    let width = n.unsigned_abs() as usize;
+    if text.len() > width {
+        return K::char_list(vec![b'*'; width]);
+    }
+    let pad = vec![b' '; width - text.len()];
+    let mut out = Vec::with_capacity(width);
+    if n > 0 {
+        out.extend_from_slice(&pad);
+        out.extend_from_slice(text);
+    } else {
+        out.extend_from_slice(text);
+        out.extend_from_slice(&pad);
+    }
+    K::char_list(out)
+}
+
 pub fn cast_verb(a: &K, b: &K) -> Result<K, KonaError> {
     match &**a {
         KData::SymbolAtom(sym) => match sym.as_ref() {
@@ -239,26 +258,14 @@ pub fn cast_verb(a: &K, b: &K) -> Result<K, KonaError> {
                 }
             } else {
                 match &**b {
-                    KData::CharList(v) => {
-                        let s = std::str::from_utf8(v).map_err(|_| KonaError::Type)?;
-                        let width = n.abs() as usize;
-                        let mut res_str = s.to_string();
-                        if res_str.len() > width {
-                            if *n > 0 {
-                                res_str.truncate(width);
-                            } else {
-                                res_str = res_str[res_str.len() - width..].to_string();
-                            }
-                        } else {
-                            let pad_len = width - res_str.len();
-                            let padding = " ".repeat(pad_len);
-                            if *n > 0 {
-                                res_str.push_str(&padding);
-                            } else {
-                                res_str.insert_str(0, &padding);
-                            }
-                        }
-                        Ok(K::char_list(res_str.into_bytes()))
+                    // n $ x pads x's text to n columns (C Kona): right-justified for n>0, left for
+                    // n<0, all stars when it does not fit. Done on bytes: slicing a String at a byte
+                    // index panicked on "é", and K strings are bytes anyway.
+                    KData::CharList(v) => Ok(pad_text(*n, v)),
+                    KData::IntAtom(_) | KData::FloatAtom(_) | KData::SymbolAtom(_) => {
+                        let text = math::format_verb(b)?;
+                        let bytes = text.as_char_list().unwrap_or(&[]).to_vec();
+                        Ok(pad_text(*n, &bytes))
                     }
                     KData::CharAtom(c) => {
                         let mut res_str = c.to_string();

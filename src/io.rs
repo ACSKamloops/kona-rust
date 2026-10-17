@@ -36,9 +36,10 @@ pub fn active_sockets() -> K {
 /// 0.000123456, 123.456789 is 123.4568 and the big ones are 8.507059e+37. Rust's {:.p} is decimal
 /// places, which cut small numbers short and printed 38-digit integers. (Made by Claude)
 pub fn fmt_g(f: f64, p: usize) -> String {
-    let p = p.max(1);
+    // \p 0 means every digit in C Kona (PPMAX = 19 significant digits), and nothing above that
+    let p = if p == 0 || p > 19 { 19 } else { p };
     if f == 0.0 {
-        return "0".to_string();
+        return if f.is_sign_negative() { "-0" } else { "0" }.to_string();
     }
     // round to p significant digits first, then read the exponent off the rounded number
     let sci = format!("{:.*e}", p - 1, f);
@@ -72,7 +73,7 @@ fn fmt_float(f: f64, with_point: bool) -> String {
         return if f.is_sign_positive() { "0i" } else { "-0i" }.to_string();
     }
     let p = PRINT_PRECISION.load(std::sync::atomic::Ordering::Relaxed);
-    let mut s = if p == 0 { format!("{}", f) } else { fmt_g(f, p) };
+    let mut s = fmt_g(f, p);
     if with_point && !s.contains('.') && !s.contains('e') {
         s.push_str(".0");
     }

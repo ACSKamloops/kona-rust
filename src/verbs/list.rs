@@ -30,9 +30,8 @@ pub fn first(x: &K) -> Result<K, KonaError> {
                 Ok(K::int(indices[0]))
             }
         }
-        KData::Dictionary { keys, .. } => first(keys),
-        KData::Nil => Ok(K::nil()),
-        KData::Function(_) => Err(KonaError::Type),
+        // atoms to first: *d is d and *{x} is {x} in C Kona
+        KData::Dictionary { .. } | KData::Nil | KData::Function(_) => Ok(x.clone()),
     }
 }
 
@@ -81,8 +80,9 @@ pub fn enlist(x: &K) -> Result<K, KonaError> {
 }
 
 pub fn count(x: &K) -> Result<K, KonaError> {
-    if x.is_function() {
-        return Ok(K::int(1)); // a function is an atom: #{x} is 1 in C Kona
+    // a function, a dictionary and nil are atoms to count (C Kona vg.c: xt>0 ? 1 : xn): #{x}, #d, #_n are 1
+    if x.is_function() || matches!(**x, KData::Nil | KData::Dictionary { .. }) {
+        return Ok(K::int(1));
     }
     let len = x.len()?;
     Ok(K::int(len as i64))
@@ -313,6 +313,30 @@ pub fn join(a: &K, b: &K) -> Result<K, KonaError> {
     Ok(normalize_list(a_vec))
 }
 
+/// The empty list of x's type: !0 for ints, "" for chars, () for anything mixed
+fn typed_empty(b: &K) -> K {
+    match &**b {
+        KData::IntAtom(_) | KData::IntList(_) => K::int_list(vec![]),
+        KData::FloatAtom(_) | KData::FloatList(_) => K::float_list(vec![]),
+        KData::CharAtom(_) | KData::CharList(_) => K::char_list(vec![]),
+        KData::SymbolAtom(_) | KData::SymbolList(_) => K::symbol_list(vec![]),
+        _ => K::general_list(vec![]),
+    }
+}
+
+/// A shape with a zero in it, as C Kona builds it: the zero dimension is a typed empty list and the
+/// dimensions before it are repeated around it (2 3 0#x is two rows of three empties)
+fn shaped_empty(dims: &[i64], b: &K) -> K {
+    match dims.first() {
+        None => typed_empty(b),
+        Some(&n) if n <= 0 => typed_empty(b),
+        Some(&n) => {
+            let inner = shaped_empty(&dims[1..], b);
+            K::general_list(vec![inner; n as usize])
+        }
+    }
+}
+
 pub fn take(a: &K, b: &K) -> Result<K, KonaError> {
     let mut dims = match &**a {
         KData::IntAtom(n) => vec![*n],
@@ -342,20 +366,17 @@ pub fn take(a: &K, b: &K) -> Result<K, KonaError> {
     let neg_ones = dims.iter().filter(|&&d| d == -1).count();
     if shape_given && neg_ones == 1 {
         let b_len = b.len().unwrap_or(0) as i64;
-        let other_prod: i64 = dims
+        let other_prod = dims
             .iter()
             .filter(|&&d| d != -1)
-            .map(|&d| d.abs())
-            .product();
-        if other_prod > 0 {
-            let auto_dim = b_len / other_prod;
-            for d in &mut dims {
-                if *d == -1 {
-                    *d = auto_dim;
-                }
+            .try_fold(1i64, |acc, &d| acc.checked_mul(d.abs()))
+            .ok_or(KonaError::WsFull)?;
+        // next to a 0 the -1 dimension is 0 as well (-1 0#"abcd" is an empty result in C Kona)
+        let auto_dim = if other_prod > 0 { b_len / other_prod } else { 0 };
+        for d in &mut dims {
+            if *d == -1 {
+                *d = auto_dim;
             }
-        } else {
-            return Err(KonaError::Length);
         }
     }
 
@@ -431,7 +452,8 @@ pub fn take(a: &K, b: &K) -> Result<K, KonaError> {
         }
     } else {
         if dims.iter().any(|&d| d <= 0) {
-            return Ok(normalize_list(vec![]));
+            // a zero in the shape: 2 0#x is (!0;!0), 0 2#x is !0 typed by x (C Kona), not a bare ()
+            return Ok(shaped_empty(&dims, b));
         }
         let prod: i64 = dims.iter().product();
         let orig_elems = to_vec_of_atoms(b)?;
@@ -667,9 +689,13 @@ pub fn flip(x: &K) -> Result<K, KonaError> {
             }
             // Every list item must have the same length; atoms are spread across that length, as in
             // C Kona: +(1 2;3) is (1 3;2 3) and +(1 2 3;"C";`x`y`z) puts "C" in every row
+            // nil, a function and a dictionary spread like atoms too (+(1 2;_n) is ((1;);(2;)))
+            let spreads = |k: &K| {
+                k.is_atom() || k.is_function() || matches!(**k, KData::Nil | KData::Dictionary { .. })
+            };
             let mut first_len: Option<usize> = None;
             for item in v {
-                if item.is_atom() {
+                if spreads(item) {
                     continue;
                 }
                 let l = match item.len() {
@@ -689,7 +715,7 @@ pub fn flip(x: &K) -> Result<K, KonaError> {
             // Transpose
             let mut sublists = Vec::new();
             for item in v {
-                if item.is_atom() {
+                if spreads(item) {
                     sublists.push(vec![item.clone(); first_len]);
                 } else {
                     sublists.push(to_vec_of_atoms(item)?);
