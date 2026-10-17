@@ -161,6 +161,18 @@ fn pad_text(n: i64, text: &[u8]) -> K {
     K::char_list(out)
 }
 
+/// C's %.de: Rust writes 2.35e0, C writes 2.35e+00
+fn c_sci(x: f64, decimals: usize) -> String {
+    let s = format!("{:.*e}", decimals, x);
+    match s.split_once('e') {
+        Some((m, e)) => {
+            let e: i32 = e.parse().unwrap_or(0);
+            format!("{}e{}{:02}", m, if e < 0 { '-' } else { '+' }, e.abs())
+        }
+        None => s,
+    }
+}
+
 pub fn cast_verb(a: &K, b: &K) -> Result<K, KonaError> {
     match &**a {
         KData::SymbolAtom(sym) => match sym.as_ref() {
@@ -216,6 +228,21 @@ pub fn cast_verb(a: &K, b: &K) -> Result<K, KonaError> {
             },
             _ => Err(KonaError::Type),
         },
+        // w.d $ number (C Kona vf.c dollar): the number to d decimals - %.df, or %.de when w.d is
+        // negative - padded to w columns with the same star rule: 7.2 $ 714 is " 714.00", -9.2 $ 2.345
+        // is "2.35e+00 "
+        KData::FloatAtom(wd)
+            if wd.trunc() != 0.0 && matches!(&**b, KData::IntAtom(_) | KData::FloatAtom(_)) =>
+        {
+            let x = b.as_float().or_else(|| b.as_int().map(|i| i as f64)).unwrap_or(0.0);
+            let decimals = ((wd.abs() * 10.0).round() as i64 % 10) as usize;
+            let text = if wd.is_sign_negative() {
+                c_sci(x, decimals)
+            } else {
+                format!("{:.*}", decimals, x)
+            };
+            Ok(pad_text(wd.trunc() as i64, text.as_bytes()))
+        }
         KData::FloatAtom(_) => match &**b {
             KData::CharList(v) => {
                 let s = std::str::from_utf8(v).map_err(|_| KonaError::Type)?;

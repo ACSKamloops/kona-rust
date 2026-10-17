@@ -37,9 +37,14 @@ pub fn first(x: &K) -> Result<K, KonaError> {
 
 pub fn reverse(x: &K) -> Result<K, KonaError> {
     match &**x {
-        KData::IntAtom(_) | KData::FloatAtom(_) | KData::CharAtom(_) | KData::SymbolAtom(_) => {
-            Ok(x.clone())
-        }
+        // atoms, functions and dictionaries included (|{x} is {x} in C Kona), reverse to themselves
+        KData::IntAtom(_)
+        | KData::FloatAtom(_)
+        | KData::CharAtom(_)
+        | KData::SymbolAtom(_)
+        | KData::Nil
+        | KData::Function(_)
+        | KData::Dictionary { .. } => Ok(x.clone()),
         KData::IntList(v) => {
             let mut rev = v.clone();
             rev.reverse();
@@ -759,7 +764,8 @@ pub fn distinct(x: &K) -> Result<K, KonaError> {
 fn numeric_tolerant_eq(a: &K, b: &K) -> bool {
     match (&**a, &**b) {
         (KData::IntAtom(i), KData::FloatAtom(f)) | (KData::FloatAtom(f), KData::IntAtom(i)) => {
-            crate::types::float_eq(*i as f64, *f)
+            // i2f so the int null matches the float null (0N _in 0n 1 is 1 in C Kona)
+            crate::types::float_eq(crate::types::i2f(*i), *f)
         }
         (KData::FloatAtom(x), KData::FloatAtom(y)) => crate::types::float_eq(*x, *y),
         _ => a == b,
