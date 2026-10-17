@@ -191,7 +191,20 @@ pub fn format_k(k: &K) -> String {
             }
         }
         KData::Dictionary { keys, values } => {
-            format!("{}!{}", format_k(keys), format_k(values))
+            // K3's spelling, which C Kona prints and both interpreters read back: .((`a;1);(`b;2)).
+            // The k4 form `a`b!1 2 that used to print here is not valid C Kona input.
+            let ks = crate::verbs::math::to_vec_of_atoms(keys).unwrap_or_default();
+            let vs = crate::verbs::math::to_vec_of_atoms(values).unwrap_or_default();
+            let entries: Vec<String> = ks
+                .iter()
+                .zip(vs.iter())
+                .map(|(k, v)| format!("({};{})", format_k(k), format_k(v)))
+                .collect();
+            match entries.len() {
+                0 => ".()".to_string(),
+                1 => format!(".,{}", entries[0]),
+                _ => format!(".({})", entries.join(";")),
+            }
         }
         KData::Function(f) => match f {
             KFunc::Primitive(name) => name.clone(),

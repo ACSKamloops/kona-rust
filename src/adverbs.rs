@@ -530,6 +530,9 @@ fn eval_scan(
         }
 
         if matches!(**operand, crate::types::KData::Function(_)) {
+            if x.is_atom() {
+                return Ok(x.clone()); // +\ 5 and {x+y}\ 5 are 5 in C Kona, not ,5
+            }
             if can_be_monadic(operand) {
                 let mut curr = x.clone();
                 let mut res = vec![curr.clone()];
@@ -546,7 +549,7 @@ fn eval_scan(
                 if x_vec.is_empty() {
                     Ok(normalize_scan_result(operand, vec![]))
                 } else if x_vec.len() == 1 {
-                    Ok(normalize_scan_result(operand, vec![x_vec[0].clone()]))
+                    Ok(x_vec[0].clone()) // a one-item scan is the item in C Kona: +\ ,5 is 5
                 } else {
                     let mut res = vec![x_vec[0].clone()];
                     let mut curr = x_vec[0].clone();
@@ -584,7 +587,7 @@ fn eval_scan(
             if x_vec.is_empty() {
                 Ok(normalize_scan_result(operand, vec![]))
             } else if x_vec.len() == 1 {
-                Ok(normalize_scan_result(operand, vec![x_vec[0].clone()]))
+                Ok(x_vec[0].clone()) // a one-item scan is the item in C Kona: +\ ,5 is 5
             } else {
                 let mut res = vec![x_vec[0].clone()];
                 let mut curr = x_vec[0].clone();
