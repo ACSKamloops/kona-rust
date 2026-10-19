@@ -12,4 +12,3 @@ while[i<n; p:(w*x)+b; e:p-y; w:w-lr*(+/e*x)%#x; b:b-lr*(+/e)%#x; i:i+1]
 `0: "w = ",$w
 `0: "b = ",$b
 `0: "loss = ",$(+/e*e)%#x
-\\
