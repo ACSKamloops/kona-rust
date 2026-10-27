@@ -2,7 +2,76 @@
 
 use crate::errors::KonaError;
 use std::cell::Cell;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+/// Immutable call setup shared by every invocation (and clone) of a user function.
+/// Captured values still live in the function's environment and are cloned per call.
+pub struct FunctionMetadata {
+    definition: FunctionDefinitionKey,
+    pub(crate) code: Arc<Vec<crate::parser::Word>>,
+    pub(crate) locals: Arc<std::collections::HashSet<String>>,
+    pub(crate) initialized_locals: Vec<String>,
+    pub(crate) parameter_bindings: Vec<usize>,
+}
+
+/// A cache key for the still-public, editable embedding definition fields.
+/// Parsed code is authoritative, as it was before metadata caching. Lazy bodies
+/// instead compare their text. An Arc clone holds the code allocation alive so
+/// that an unrelated allocation cannot reuse its identity.
+pub(crate) struct FunctionDefinitionKey {
+    params: Vec<String>,
+    code: Option<Arc<Vec<crate::parser::Word>>>,
+    lazy_body: Option<String>,
+}
+
+impl FunctionDefinitionKey {
+    pub(crate) fn new(body: &str, params: &[String], code: &Option<Arc<Vec<crate::parser::Word>>>) -> Self {
+        Self { params: params.to_vec(), code: code.clone(),
+            lazy_body: code.is_none().then(|| body.to_owned()) }
+    }
+
+    pub(crate) fn matches(&self, body: &str, params: &[String], code: &Option<Arc<Vec<crate::parser::Word>>>) -> bool {
+        self.params == params && match (&self.code, code) {
+            (Some(old), Some(new)) => Arc::ptr_eq(old, new),
+            (None, None) => self.lazy_body.as_deref() == Some(body),
+            _ => false,
+        }
+    }
+}
+
+impl FunctionMetadata {
+    pub(crate) fn new(code: Arc<Vec<crate::parser::Word>>, params: &[String], body: &str,
+        definition_code: &Option<Arc<Vec<crate::parser::Word>>>) -> Self {
+        use crate::parser::Word;
+        use std::collections::HashSet;
+        fn traverse(words: &[Word], locals: &mut HashSet<String>) {
+            for word in words {
+                match word {
+                    Word::LocalAssign(name) => { locals.insert(name.clone()); }
+                    Word::Paren(exprs) | Word::Bracket(exprs) => {
+                        for expr in exprs { traverse(expr, locals); }
+                    }
+                    // A nested brace function has its own local scope.
+                    _ => {}
+                }
+            }
+        }
+        let mut locals = HashSet::new();
+        traverse(&code, &mut locals);
+        let mut bound = HashSet::new();
+        // K binds a repeated parameter name to its FIRST argument.
+        let parameter_bindings = params.iter().enumerate()
+            .filter_map(|(i, name)| bound.insert(name).then_some(i)).collect();
+        let initialized_locals = locals.iter()
+            .filter(|name| !bound.contains(name)).cloned().collect();
+        Self { definition: FunctionDefinitionKey::new(body, params, definition_code),
+            code, locals: Arc::new(locals), initialized_locals, parameter_bindings }
+    }
+
+    pub(crate) fn matches_definition(&self, body: &str, params: &[String], code: &Option<Arc<Vec<crate::parser::Word>>>) -> bool {
+        self.definition.matches(body, params, code)
+    }
+}
 
 thread_local! {
     static RECURSION_DEPTH: Cell<usize> = Cell::new(0);
@@ -52,6 +121,9 @@ pub enum KFunc {
         args: Vec<String>,
         code: Option<std::sync::Arc<Vec<crate::parser::Word>>>,
         env: Option<std::collections::HashMap<String, K>>,
+        /// Parsed functions fill this at construction. Deserialized/API functions
+        /// fill it on the first fully applied call, preserving lazy parse errors.
+        metadata: Arc<OnceLock<FunctionMetadata>>,
     },
     Composition {
         f: K,
@@ -129,7 +201,19 @@ impl KFunc {
             args,
             code: None,
             env: None,
+            metadata: Arc::new(OnceLock::new()),
         }
+    }
+
+    pub(crate) fn parsed_user_defined(
+        body: String,
+        args: Vec<String>,
+        code: Vec<crate::parser::Word>,
+        env: Option<std::collections::HashMap<String, K>>,
+    ) -> Self {
+        let code = Arc::new(code);
+        let metadata = Arc::new(OnceLock::from(FunctionMetadata::new(code.clone(), &args, &body, &Some(code.clone()))));
+        Self::UserDefined { body, args, code: Some(code), env, metadata }
     }
 
     pub fn composition(f: K, g: K) -> Self {
@@ -953,11 +1037,13 @@ impl Clone for KFunc {
                 args,
                 code,
                 env,
+                metadata,
             } => KFunc::UserDefined {
                 body: body.clone(),
                 args: args.clone(),
                 code: code.clone(),
                 env: env.clone(),
+                metadata: metadata.clone(),
             },
             KFunc::Composition { f, g } => {
                 if let Some(_g) = DepthGuard::new() {
@@ -997,6 +1083,7 @@ impl std::fmt::Debug for KFunc {
                 args,
                 code,
                 env,
+                ..
             } => f
                 .debug_struct("UserDefined")
                 .field("body", body)

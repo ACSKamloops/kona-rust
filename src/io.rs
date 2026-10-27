@@ -705,12 +705,7 @@ impl<'a> KDeserializer<'a> {
                         for _ in 0..len {
                             args.push(self.read_string()?);
                         }
-                        Ok(K::function(KFunc::UserDefined {
-                            body,
-                            args,
-                            code: None,
-                            env: None,
-                        }))
+                        Ok(K::function(KFunc::user_defined(body, args)))
                     }
                     16 => {
                         let f = self.read_k()?;

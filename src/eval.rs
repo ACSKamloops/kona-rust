@@ -2,7 +2,7 @@
 
 use crate::errors::KonaError;
 use crate::parser::Word;
-use crate::types::{K, KData, KFunc};
+use crate::types::{FunctionMetadata, K, KData, KFunc};
 use crate::verbs::dict::KTree;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -11,7 +11,7 @@ thread_local! {
     pub static PENDING_ERROR: std::cell::Cell<Option<crate::errors::KonaError>> = std::cell::Cell::new(None);
     pub static IGNORE_PENDING_ERROR: std::cell::Cell<bool> = std::cell::Cell::new(false);
     static RECURSION_DEPTH: std::cell::Cell<usize> = std::cell::Cell::new(0);
-    static RECENT_LOCALS: std::cell::RefCell<std::collections::HashSet<String>> = std::cell::RefCell::new(std::collections::HashSet::new());
+    static RECENT_LOCALS: std::cell::RefCell<Arc<std::collections::HashSet<String>>> = std::cell::RefCell::new(Arc::new(std::collections::HashSet::new()));
 }
 
 /// Nested evaluations (eval_words_flow and apply_func frames together) before a limit error. A
@@ -898,12 +898,9 @@ fn eval_rightmost_flow<'a>(
             } else {
                 None
             };
-            let func = K::function(KFunc::UserDefined {
-                body: body.clone(),
-                args: args.clone(),
-                code: Some(std::sync::Arc::new(code.clone())),
-                env: captured,
-            });
+            let func = K::function(KFunc::parsed_user_defined(
+                body.clone(), args.clone(), code.clone(), captured,
+            ));
             Ok((EvalFlow::Value(func), &words[..len - 1]))
         }
         Word::LocalAssign(_) | Word::GlobalAssign(_) => Err(KonaError::Parse(
@@ -1399,32 +1396,6 @@ fn eval_words_flow(
         .ok_or_else(|| KonaError::Parse("Empty expression".to_string()))
 }
 
-fn find_locals(words: &[Word]) -> std::collections::HashSet<String> {
-    let mut locals = std::collections::HashSet::new();
-    fn traverse(words: &[Word], locals: &mut std::collections::HashSet<String>) {
-        for w in words {
-            match w {
-                Word::LocalAssign(name) => {
-                    locals.insert(name.clone());
-                }
-                Word::Paren(exprs) => {
-                    for expr in exprs {
-                        traverse(expr, locals);
-                    }
-                }
-                Word::Bracket(exprs) => {
-                    for expr in exprs {
-                        traverse(expr, locals);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    traverse(words, &mut locals);
-    locals
-}
-
 /// Applies a function to fully-specified positional arguments.
 pub fn apply_func(
     func: &K,
@@ -1504,6 +1475,7 @@ pub fn apply_func(
                 args: param_names,
                 code: opt_code,
                 env: captured_env,
+                metadata,
             } => {
                 let collapsed_args;
                 let mut final_args = args;
@@ -1537,42 +1509,43 @@ pub fn apply_func(
                     return Ok(K::function(KFunc::projection(func.clone(), proj_args)));
                 }
 
+                let mut private_metadata = None;
+                if !metadata.get().is_some_and(|cached| cached.matches_definition(body, param_names, opt_code)) {
+                    let code = if let Some(code) = opt_code {
+                        code.clone()
+                    } else {
+                        Arc::new(crate::parser::parse(strip_param_list(body))?)
+                    };
+                    let fresh = FunctionMetadata::new(code, param_names, body, opt_code);
+                    // A clone may have edited its public definition fields after the
+                    // shared cache was initialized. Never consume the old definition's
+                    // metadata or replace a cache another clone still uses.
+                    if metadata.get().is_none() {
+                        if let Err(unpublished) = metadata.set(fresh) {
+                            private_metadata = Some(unpublished);
+                        }
+                    } else {
+                        private_metadata = Some(fresh);
+                    }
+                }
+                let metadata = private_metadata.as_ref()
+                    .unwrap_or_else(|| metadata.get().expect("function metadata initialized"));
                 let mut local_env = if let Some(c_env) = captured_env {
                     c_env.clone()
                 } else {
-                    let mut empty = HashMap::new();
-                    empty.insert("_local".to_string(), K::nil());
-                    empty
+                    HashMap::with_capacity(2 + metadata.parameter_bindings.len()
+                        + metadata.initialized_locals.len())
                 };
                 local_env.insert("_local".to_string(), K::nil());
                 local_env.insert("_f".to_string(), func.clone());
-                let mut bound_params = std::collections::HashSet::new();
-                for (name, val) in param_names.iter().zip(final_args.iter()) {
-                    if bound_params.insert(name.clone()) {
-                        local_env.insert(name.clone(), val.clone());
-                    }
+                for &index in &metadata.parameter_bindings {
+                    local_env.insert(param_names[index].clone(), final_args[index].clone());
                 }
-
-                let local_words = if let Some(code_arc) = opt_code {
-                    code_arc.clone()
-                } else {
-                    let clean_body = strip_param_list(body);
-                    std::sync::Arc::new(crate::parser::parse(clean_body)?)
-                };
-                let locals = find_locals(&local_words);
-                for name in &locals {
-                    if !param_names.contains(name) {
-                        local_env.insert(name.clone(), K::nil());
-                    }
+                for name in &metadata.initialized_locals {
+                    local_env.insert(name.clone(), K::nil());
                 }
-                RECENT_LOCALS.with(|rl| {
-                    let mut set = rl.borrow_mut();
-                    set.clear();
-                    for name in &locals {
-                        set.insert(name.clone());
-                    }
-                });
-                eval_words(&local_words, &mut local_env, ktree)
+                RECENT_LOCALS.with(|rl| *rl.borrow_mut() = metadata.locals.clone());
+                eval_words(&metadata.code, &mut local_env, ktree)
             }
             KFunc::Composition { f, g } => {
                 let res_g = apply_func(g, args, env, ktree)?;
